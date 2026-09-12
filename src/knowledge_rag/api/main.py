@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 
 from knowledge_rag.api.models import (
     QueryRequest,
@@ -18,7 +18,20 @@ app = FastAPI(
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    try:
+        with get_connection() as conn:
+            conn.execute("SELECT 1;")
+
+        return {
+            "status": "ok",
+            "database": "ok",
+        }
+
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service dependency unavailable.",
+        )
 
 
 @app.post(
@@ -28,16 +41,23 @@ def health() -> dict[str, str]:
 def query(request: QueryRequest) -> QueryResponse:
     """Run semantic retrieval for a query string."""
 
-    provider = get_embedding_provider()
+    try:
+        provider = get_embedding_provider()
 
-    with get_connection() as conn:
-        results = semantic_search(
-            conn,
-            provider,
-            query=request.query,
-            limit=request.top_k,
-            note_type=request.note_type,
-            topic=request.topic,
+        with get_connection() as conn:
+            results = semantic_search(
+                conn,
+                provider,
+                query=request.query,
+                limit=request.top_k,
+                note_type=request.note_type,
+                topic=request.topic,
+            )
+
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Query service temporarily unavailable.",
         )
 
     return QueryResponse(
