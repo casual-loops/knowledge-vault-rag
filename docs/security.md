@@ -32,7 +32,7 @@ Runtime secrets belong in `.env`, a secret manager, or deployment-specific prote
 
 ## Threat model
 
-The primary privacy risk is unintended disclosure of private vault content through indexing, logging, embeddings, retrieval, generation context, public source control, or external APIs.
+The primary privacy risk is unintended disclosure of private vault content through indexing, logging, embeddings, retrieval, generation context, public source control, API responses, or external APIs.
 
 The system therefore assumes:
 
@@ -41,6 +41,7 @@ The system therefore assumes:
 - External embedding and generation providers are separate trust boundaries.
 - Configuration mistakes and missing metadata must fail conservatively.
 - Application logs must not become an accidental secondary copy of note content.
+- API error responses must not expose secrets, connection details, raw exception text, or unintended note content.
 - The public repository must never contain real private-vault data.
 
 ## Note-level AI access policy
@@ -94,6 +95,24 @@ Only content explicitly marked `allowed` may cross the external generation bound
 
 The embedding pipeline must apply the same external-use policy before sending chunk content to an external embedding provider.
 
+### API boundary
+
+The FastAPI query service exposes retrieval results through explicit response models and validates request data before query execution.
+
+Invalid request bodies are rejected with HTTP `422`.
+
+Operational failures in database connectivity, embedding-provider setup, or retrieval return HTTP `503` with generic error details.
+
+API error responses must not include:
+
+- credentials or tokens
+- database connection strings
+- internal hostnames or private network details
+- raw stack traces or exception text
+- note bodies or retrieved context not already part of an authorized successful response
+
+The `/health` endpoint reports dependency status without revealing sensitive connection details.
+
 ## Logging policy
 
 Normal application logs may include operational metadata such as:
@@ -125,6 +144,7 @@ When creating or importing a note:
 6. Validate exclusion rules before enabling ingestion of a real vault.
 7. Review external-provider policy before enabling embeddings or generation.
 8. Keep the real vault, database contents, and runtime secrets outside the public repository.
+9. Verify API and health responses remain sanitized before exposing the service beyond trusted development access.
 
 ## Defense in depth
 
@@ -140,6 +160,7 @@ The system combines:
 - ingestion-time enforcement
 - persisted `ai_access` state
 - external generation filtering
+- API response modeling and sanitized errors
 - log-content restrictions
 
 A failure at one layer should not automatically authorize disclosure at another.
