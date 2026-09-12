@@ -27,6 +27,11 @@ class GenerationProvider(ABC):
     ) -> str:
         """Generate a response for the supplied prompt."""
 
+    @property
+    @abstractmethod
+    def is_external(self) -> bool:
+        """Whether this provider sends content outside the local environment."""
+
 
 class DeterministicGenerationProvider(GenerationProvider):
     """Deterministic provider intended for tests and offline development."""
@@ -37,6 +42,10 @@ class DeterministicGenerationProvider(GenerationProvider):
         prompt: str,
     ) -> str:
         return f"Generated response for: {prompt}"
+
+    @property
+    def is_external(self) -> bool:
+        return False
 
 
 class OpenAIGenerationProvider(GenerationProvider):
@@ -79,3 +88,7 @@ class OpenAIGenerationProvider(GenerationProvider):
         )
 
         return str(response.output_text)
+
+    @property
+    def is_external(self) -> bool:
+        return True
