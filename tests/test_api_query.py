@@ -15,7 +15,9 @@ client = TestClient(app)
 def fake_connection():
     """Provide a harmless stand-in for the database connection context."""
 
-    yield SimpleNamespace()
+    yield SimpleNamespace(
+        execute=lambda *args, **kwargs: None,
+    )
 
 
 def fake_search_results() -> list[SearchResult]:
@@ -288,3 +290,118 @@ def test_query_rejects_top_k_above_maximum() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_query_handles_database_failure(monkeypatch) -> None:
+    def failing_connection():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        failing_connection,
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "privacy",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Query service temporarily unavailable."
+    }
+
+
+def test_query_handles_provider_failure(monkeypatch) -> None:
+    def failing_provider():
+        raise RuntimeError("provider failure")
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        failing_provider,
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "privacy",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Query service temporarily unavailable."
+    }
+
+
+def test_query_handles_retrieval_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        lambda: SimpleNamespace(),
+    )
+
+    def failing_search(*args, **kwargs):
+        raise RuntimeError("retrieval failure")
+
+    monkeypatch.setattr(
+        api_main,
+        "semantic_search",
+        failing_search,
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "privacy",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Query service temporarily unavailable."
+    }
+
+
+def test_health_reports_database_available(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "database": "ok",
+    }
+
+
+def test_health_handles_database_failure(monkeypatch) -> None:
+    def failing_connection():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        failing_connection,
+    )
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Service dependency unavailable."
+    }
