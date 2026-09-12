@@ -7,6 +7,9 @@ class QueryRequest(BaseModel):
     """Request body for semantic retrieval."""
 
     query: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=25)
+    note_type: str | None = Field(default=None, min_length=1)
+    topic: str | None = Field(default=None, min_length=1)
 
 
 class QueryResult(BaseModel):

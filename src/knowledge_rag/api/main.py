@@ -35,6 +35,9 @@ def query(request: QueryRequest) -> QueryResponse:
             conn,
             provider,
             query=request.query,
+            limit=request.top_k,
+            note_type=request.note_type,
+            topic=request.topic,
         )
 
     return QueryResponse(
