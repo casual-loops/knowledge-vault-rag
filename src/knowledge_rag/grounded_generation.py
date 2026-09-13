@@ -8,11 +8,23 @@ from knowledge_rag.retrieval_policy import (
 
 
 @dataclass(frozen=True, slots=True)
+class SourceCitation:
+    """Stable citation metadata for a generated answer source."""
+
+    citation_id: str
+    source_path: str
+    title: str | None
+    heading_path: str | None
+    chunk_index: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class GroundedAnswer:
-    """Generated answer plus the source chunks used to produce it."""
+    """Generated answer plus source chunks and citation metadata."""
 
     answer: str
     sources: list[RetrievedChunk]
+    citations: list[SourceCitation]
 
 
 def build_generation_context(
@@ -45,6 +57,27 @@ def build_generation_context(
     return "\n\n".join(selected_parts), selected_chunks
 
 
+def build_source_citations(
+    chunks: list[RetrievedChunk],
+) -> list[SourceCitation]:
+    """Build stable citations in source order."""
+
+    citations: list[SourceCitation] = []
+
+    for index, chunk in enumerate(chunks, start=1):
+        citations.append(
+            SourceCitation(
+                citation_id=f"S{index}",
+                source_path=chunk.source_path,
+                title=chunk.metadata.get("title"),
+                heading_path=chunk.metadata.get("heading_path"),
+                chunk_index=chunk.metadata.get("chunk_index"),
+            )
+        )
+
+    return citations
+
+
 def generate_grounded_answer(
     *,
     query: str,
@@ -63,6 +96,7 @@ def generate_grounded_answer(
         return GroundedAnswer(
             answer="",
             sources=[],
+            citations=[],
         )
 
     context, selected_chunks = build_generation_context(
@@ -74,6 +108,7 @@ def generate_grounded_answer(
         return GroundedAnswer(
             answer="",
             sources=[],
+            citations=[],
         )
 
     prompt = (
@@ -89,4 +124,5 @@ def generate_grounded_answer(
     return GroundedAnswer(
         answer=answer,
         sources=selected_chunks,
+        citations=build_source_citations(selected_chunks),
     )
