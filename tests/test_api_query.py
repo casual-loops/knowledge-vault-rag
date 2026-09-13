@@ -33,7 +33,8 @@ def fake_search_results() -> list[SearchResult]:
             chunk_index=0,
             heading_path="Reference One",
             content="Synthetic reference content.",
-            distance=0.1,
+            score=0.75,
+            score_type="semantic",
         ),
         SearchResult(
             source_path="Study One.md",
@@ -44,7 +45,8 @@ def fake_search_results() -> list[SearchResult]:
             chunk_index=0,
             heading_path="Study One",
             content="Synthetic study content.",
-            distance=0.2,
+            score=0.75,
+            score_type="semantic",
         ),
     ]
 

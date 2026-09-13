@@ -78,7 +78,8 @@ def query(request: QueryRequest) -> QueryResponse:
                 chunk_index=result.chunk_index,
                 heading_path=result.heading_path,
                 content=result.content,
-                distance=result.distance,
+                score=result.score,
+                score_type=result.score_type,
             )
             for result in results
         ]

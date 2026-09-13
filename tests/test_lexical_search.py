@@ -58,7 +58,8 @@ def test_lexical_search_returns_ranked_results() -> None:
     assert result.chunk_index == 0
     assert result.heading_path == "Reference"
     assert result.content == "Synthetic lexical match."
-    assert result.distance == 0.25
+    assert result.score == 0.75
+    assert result.score_type == "lexical"
 
 
 def test_lexical_search_passes_filters() -> None:
