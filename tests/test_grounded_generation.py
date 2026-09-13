@@ -1,6 +1,8 @@
 from knowledge_rag.generation import GenerationProvider
 from knowledge_rag.grounded_generation import (
+    SourceCitation,
     build_generation_context,
+    build_source_citations,
     generate_grounded_answer,
 )
 from knowledge_rag.retrieval_policy import RetrievedChunk
@@ -214,4 +216,138 @@ def test_external_provider_skips_generation_when_no_chunks_are_allowed() -> None
 
     assert result.answer == ""
     assert result.sources == []
+    assert result.citations == []
     assert provider.prompts == []
+
+
+def test_source_citations_preserve_source_order() -> None:
+    chunks = [
+        RetrievedChunk(
+            source_path="First.md",
+            content="First content.",
+            ai_access="allowed",
+            metadata={
+                "title": "First",
+                "heading_path": "First > Section",
+                "chunk_index": 2,
+            },
+        ),
+        RetrievedChunk(
+            source_path="Second.md",
+            content="Second content.",
+            ai_access="allowed",
+            metadata={
+                "title": "Second",
+                "heading_path": "Second > Section",
+                "chunk_index": 4,
+            },
+        ),
+    ]
+
+    citations = build_source_citations(chunks)
+
+    assert [citation.citation_id for citation in citations] == [
+        "S1",
+        "S2",
+    ]
+
+    assert citations[0].source_path == "First.md"
+    assert citations[1].source_path == "Second.md"
+
+
+def test_source_citations_include_expected_metadata() -> None:
+    chunk = RetrievedChunk(
+        source_path="Reference.md",
+        content="Synthetic content.",
+        ai_access="allowed",
+        metadata={
+            "title": "Reference",
+            "heading_path": "Reference > Details",
+            "chunk_index": 3,
+        },
+    )
+
+    citations = build_source_citations([chunk])
+
+    assert citations == [
+        SourceCitation(
+            citation_id="S1",
+            source_path="Reference.md",
+            title="Reference",
+            heading_path="Reference > Details",
+            chunk_index=3,
+        )
+    ]
+
+
+def test_grounded_answer_returns_citations_for_used_sources() -> None:
+    provider = FakeGenerationProvider(
+        is_external=False,
+    )
+
+    chunks = [
+        RetrievedChunk(
+            source_path="Reference.md",
+            content="Synthetic context.",
+            ai_access="allowed",
+            metadata={
+                "title": "Reference",
+                "heading_path": "Reference",
+                "chunk_index": 0,
+            },
+        )
+    ]
+
+    result = generate_grounded_answer(
+        query="Synthetic query",
+        chunks=chunks,
+        provider=provider,
+    )
+
+    assert result.citations == [
+        SourceCitation(
+            citation_id="S1",
+            source_path="Reference.md",
+            title="Reference",
+            heading_path="Reference",
+            chunk_index=0,
+        )
+    ]
+
+
+def test_external_provider_citations_exclude_unauthorized_sources() -> None:
+    provider = FakeGenerationProvider(
+        is_external=True,
+    )
+
+    chunks = [
+        RetrievedChunk(
+            source_path="Allowed.md",
+            content="Allowed content.",
+            ai_access="allowed",
+            metadata={
+                "title": "Allowed",
+                "heading_path": "Allowed",
+                "chunk_index": 0,
+            },
+        ),
+        RetrievedChunk(
+            source_path="Local.md",
+            content="Local-only content.",
+            ai_access="local-only",
+            metadata={
+                "title": "Local",
+                "heading_path": "Local",
+                "chunk_index": 0,
+            },
+        ),
+    ]
+
+    result = generate_grounded_answer(
+        query="Synthetic query",
+        chunks=chunks,
+        provider=provider,
+    )
+
+    assert len(result.citations) == 1
+    assert result.citations[0].source_path == "Allowed.md"
