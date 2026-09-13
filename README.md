@@ -54,19 +54,19 @@ Workstation
 
 ## Current stack
 
-| Layer                 | Technology                                                                         | Status                              |
-| --------------------- | ---------------------------------------------------------------------------------- | ----------------------------------- |
-| Knowledge authoring   | Obsidian and Markdown                                                              | Operational                         |
-| Vault version history | Private Git repository                                                             | Operational                         |
-| Vault synchronization | Syncthing                                                                          | Operational                         |
-| Homelab vault storage | ZFS-backed storage                                                                 | Operational                         |
-| Application           | Python                                                                             | Scaffolded                          |
-| API                   | FastAPI                                                                            | Semantic query service implemented  |
-| Database              | PostgreSQL 17                                                                      | Operational in homelab              |
-| Vector search         | pgvector 0.8.0                                                                     | Enabled                             |
-| Embeddings            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                         |
-| Generation            | External LLM API                                                                   | Planned                             |
-| Production runtime    | Dedicated Debian 13 LXC                                                            | Operational                         |
+| Layer                 | Technology                                                                         | Status                                      |
+| --------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------- |
+| Knowledge authoring   | Obsidian and Markdown                                                              | Operational                                 |
+| Vault version history | Private Git repository                                                             | Operational                                 |
+| Vault synchronization | Syncthing                                                                          | Operational                                 |
+| Homelab vault storage | ZFS-backed storage                                                                 | Operational                                 |
+| Application           | Python                                                                             | Operational development implementation      |
+| API                   | FastAPI                                                                            | Retrieval and grounded answer APIs implemented |
+| Database              | PostgreSQL 17                                                                      | Operational in homelab                      |
+| Vector search         | pgvector 0.8.0                                                                     | Enabled                                     |
+| Embeddings            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
+| Generation            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
+| Production runtime    | Dedicated Debian 13 LXC                                                            | Operational                                 |
 
 ## Development model
 
@@ -111,7 +111,7 @@ Docker Compose remains available as a portable development option, but the activ
 - [x] Phase 7: Privacy-aware indexing and retrieval policies
 - [x] Phase 8: Embedding pipeline and semantic retrieval
 - [x] Phase 9: FastAPI query service
-- [ ] Phase 10: Grounded answer generation with citations
+- [x] Phase 10: Grounded answer generation with citations
 - [ ] Phase 11: Hybrid lexical and vector search
 - [ ] Phase 12: Retrieval evaluation and regression tests
 - [ ] Phase 13: Production vault indexing
@@ -119,7 +119,7 @@ Docker Compose remains available as a portable development option, but the activ
 
 ## FastAPI Query Service
 
-The FastAPI service exposes semantic retrieval through a small JSON API.
+The FastAPI service exposes semantic retrieval and grounded answer generation through a small JSON API.
 
 ### Health Endpoint
 
@@ -200,6 +200,71 @@ Invalid request bodies return HTTP `422`.
 
 Database, embedding-provider, or retrieval failures return HTTP `503` with a generic service error rather than exposing internal details.
 
+### Grounded Answer Endpoint
+
+```http
+POST /answer
+```
+
+The grounded answer endpoint performs semantic retrieval, applies generation privacy controls, builds bounded context, and returns a generated answer together with citation and source metadata.
+
+Example request:
+
+```json
+{
+  "query": "privacy controls for external AI use",
+  "top_k": 5,
+  "note_type": "reference",
+  "topic": "privacy-demo"
+}
+```
+
+The request supports the same query controls as semantic retrieval:
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `query` | Yes | Query text used for retrieval and grounded generation. Must not be empty. |
+| `top_k` | No | Maximum number of retrieved results. Defaults to `5`; allowed range is `1` through `25`. |
+| `note_type` | No | Filters retrieval to a specific note type. |
+| `topic` | No | Filters retrieval to a specific topic value. |
+
+Example response:
+
+```json
+{
+  "answer": "Synthetic grounded answer.",
+  "citations": [
+    {
+      "citation_id": "S1",
+      "source_path": "50 Privacy/Allowed Note.md",
+      "title": "Allowed Note",
+      "heading_path": "Allowed Note",
+      "chunk_index": 0
+    }
+  ],
+  "sources": [
+    {
+      "source_path": "50 Privacy/Allowed Note.md",
+      "title": "Allowed Note",
+      "heading_path": "Allowed Note",
+      "chunk_index": 0,
+      "content": "Synthetic example content.",
+      "ai_access": "allowed"
+    }
+  ]
+}
+```
+
+Citation identifiers are assigned in source order and are independent of the configured generation provider.
+
+Only source chunks actually used for generation are returned. When an external generation provider is selected, `local-only` chunks are removed before prompt construction, citation creation, and provider invocation.
+
+If retrieval produces no usable generation context, the endpoint returns an empty answer with empty citation and source lists.
+
+Invalid request bodies return HTTP `422`.
+
+Retrieval, embedding-provider, generation-provider, database, or generation failures return HTTP `503` with a generic service error that does not expose note content, credentials, connection information, or internal exception text.
+
 ## Infrastructure follow-up
 
 The RAG container is operational, but two infrastructure controls remain open before the service is considered production-ready:
@@ -217,12 +282,14 @@ The production system is expected to add explicit policy controls so notes can b
 
 ## Status
 
-The infrastructure foundation and core retrieval pipeline are operational.
+The infrastructure foundation, semantic retrieval pipeline, and grounded answer generation pipeline are operational.
 
-The system can parse synthetic Markdown notes, enforce privacy-aware indexing rules, persist documents and chunks in PostgreSQL, generate deterministic development embeddings, store vectors in pgvector, perform top-k semantic retrieval with metadata filtering, and expose retrieval through a validated FastAPI query service.
+The system can parse synthetic Markdown notes, enforce privacy-aware indexing and generation rules, persist documents and chunks in PostgreSQL, generate deterministic development embeddings, store vectors in pgvector, perform top-k semantic retrieval with metadata filtering, and expose both retrieval and grounded answer generation through FastAPI.
 
-An OpenAI embedding adapter is implemented but has not been live-validated because external API usage is optional and separately billed. Development and automated tests remain fully functional without external API credentials.
+Grounded generation uses a provider abstraction with a deterministic local implementation for development and testing and an optional OpenAI adapter for external generation. Automated tests do not require live external API credentials.
 
-The FastAPI query service is operational with validated semantic retrieval, metadata filters, bounded result controls, dependency health checks, and deterministic endpoint tests.
+Generated answers return stable citation identifiers together with vault-relative source path, title, heading path, chunk index, source content, and effective AI access policy for the chunks actually used.
 
-The next software milestone is grounded answer generation with citations.
+External generation applies privacy filtering before prompt construction so `local-only` content is not transmitted to an external provider or exposed through generated-answer citations.
+
+The next software milestone is Phase 11: hybrid lexical and vector search.
