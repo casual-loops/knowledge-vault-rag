@@ -13,7 +13,7 @@ class QueryRequest(BaseModel):
 
 
 class QueryResult(BaseModel):
-    """One semantic retrieval result returned by the API."""
+    """One retrieval result returned by the API."""
 
     source_path: str
     title: str
@@ -23,7 +23,8 @@ class QueryResult(BaseModel):
     chunk_index: int
     heading_path: str | None
     content: str
-    distance: float
+    score: float
+    score_type: str
 
 
 class QueryResponse(BaseModel):

@@ -8,7 +8,7 @@ from knowledge_rag.embeddings import EmbeddingProvider
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """One semantic retrieval result with source metadata."""
+    """One retrieval result with source metadata and retrieval score."""
 
     source_path: str
     title: str
@@ -18,7 +18,8 @@ class SearchResult:
     chunk_index: int
     heading_path: str | None
     content: str
-    distance: float
+    score: float
+    score_type: str
 
 
 def semantic_search(
@@ -71,18 +72,19 @@ def semantic_search(
 ).fetchall()
 
     return [
-        SearchResult(
-            source_path=row[0],
-            title=row[1],
-            note_type=row[2],
-            topic=row[3],
-            ai_access=row[4],
-            chunk_index=row[5],
-            heading_path=row[6],
-            content=row[7],
-            distance=float(row[8]),
-        )
-        for row in rows
+    SearchResult(
+        source_path=row[0],
+        title=row[1],
+        note_type=row[2],
+        topic=row[3],
+        ai_access=row[4],
+        chunk_index=row[5],
+        heading_path=row[6],
+        content=row[7],
+        score=1.0 - float(row[8]),
+        score_type="semantic",
+    )
+    for row in rows
     ]
 
 
@@ -153,16 +155,88 @@ def lexical_search(
     ).fetchall()
 
     return [
-        SearchResult(
-            source_path=row[0],
-            title=row[1],
-            note_type=row[2],
-            topic=row[3],
-            ai_access=row[4],
-            chunk_index=row[5],
-            heading_path=row[6],
-            content=row[7],
-            distance=1.0 - float(row[8]),
+    SearchResult(
+        source_path=row[0],
+        title=row[1],
+        note_type=row[2],
+        topic=row[3],
+        ai_access=row[4],
+        chunk_index=row[5],
+        heading_path=row[6],
+        content=row[7],
+        score=float(row[8]),
+        score_type="lexical",
+    )
+    for row in rows
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class HybridSearchResult:
+    """One hybrid retrieval result produced from fused rankings."""
+
+    source_path: str
+    title: str
+    note_type: str | None
+    topic: Any
+    ai_access: str
+    chunk_index: int
+    heading_path: str | None
+    content: str
+    score: float
+
+
+def hybrid_search(
+    semantic_results: list[SearchResult],
+    lexical_results: list[SearchResult],
+    *,
+    limit: int = 5,
+    rrf_k: int = 60,
+) -> list[HybridSearchResult]:
+    """Fuse semantic and lexical rankings with reciprocal rank fusion."""
+
+    fused: dict[tuple[str, int], dict[str, Any]] = {}
+
+    def add_results(results: list[SearchResult]) -> None:
+        for rank, result in enumerate(results, start=1):
+            key = (
+                result.source_path,
+                result.chunk_index,
+            )
+
+            contribution = 1.0 / (rrf_k + rank)
+
+            if key not in fused:
+                fused[key] = {
+                    "result": result,
+                    "score": 0.0,
+                }
+
+            fused[key]["score"] += contribution
+
+    add_results(semantic_results)
+    add_results(lexical_results)
+
+    ranked = sorted(
+        fused.values(),
+        key=lambda item: (
+            -item["score"],
+            item["result"].source_path,
+            item["result"].chunk_index,
+        ),
+    )
+
+    return [
+        HybridSearchResult(
+            source_path=item["result"].source_path,
+            title=item["result"].title,
+            note_type=item["result"].note_type,
+            topic=item["result"].topic,
+            ai_access=item["result"].ai_access,
+            chunk_index=item["result"].chunk_index,
+            heading_path=item["result"].heading_path,
+            content=item["result"].content,
+            score=item["score"],
         )
-        for row in rows
+        for item in ranked[:limit]
     ]
