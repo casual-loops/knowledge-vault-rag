@@ -13,7 +13,11 @@ from knowledge_rag.db import get_connection
 from knowledge_rag.embedding_factory import get_embedding_provider
 from knowledge_rag.generation_factory import get_generation_provider
 from knowledge_rag.grounded_generation import generate_grounded_answer
-from knowledge_rag.retrieval import semantic_search
+from knowledge_rag.retrieval import (
+    hybrid_search,
+    lexical_search,
+    semantic_search,
+)
 from knowledge_rag.retrieval_policy import RetrievedChunk
 
 
@@ -52,13 +56,14 @@ def query(request: QueryRequest) -> QueryResponse:
         provider = get_embedding_provider()
 
         with get_connection() as conn:
-            results = semantic_search(
-                conn,
-                provider,
+            results = run_retrieval(
+                conn=conn,
+                embedding_provider=provider,
                 query=request.query,
                 limit=request.top_k,
                 note_type=request.note_type,
                 topic=request.topic,
+                retrieval_mode=request.retrieval_mode,
             )
 
     except Exception:
@@ -98,13 +103,14 @@ def answer(request: GroundedQueryRequest) -> GroundedQueryResponse:
         generation_provider = get_generation_provider()
 
         with get_connection() as conn:
-            results = semantic_search(
-                conn,
-                embedding_provider,
+            results = run_retrieval(
+                conn=conn,
+                embedding_provider=embedding_provider,
                 query=request.query,
                 limit=request.top_k,
                 note_type=request.note_type,
                 topic=request.topic,
+                retrieval_mode=request.retrieval_mode,
             )
 
         chunks = [
@@ -156,4 +162,59 @@ def answer(request: GroundedQueryRequest) -> GroundedQueryResponse:
             )
             for source in grounded.sources
         ],
+    )
+
+
+def run_retrieval(
+    *,
+    conn,
+    embedding_provider,
+    query: str,
+    limit: int,
+    note_type: str | None,
+    topic: str | None,
+    retrieval_mode: str,
+):
+    """Run the requested retrieval strategy."""
+
+    if retrieval_mode == "semantic":
+        return semantic_search(
+            conn,
+            embedding_provider,
+            query=query,
+            limit=limit,
+            note_type=note_type,
+            topic=topic,
+        )
+
+    if retrieval_mode == "lexical":
+        return lexical_search(
+            conn,
+            query=query,
+            limit=limit,
+            note_type=note_type,
+            topic=topic,
+        )
+
+    semantic_results = semantic_search(
+        conn,
+        embedding_provider,
+        query=query,
+        limit=limit,
+        note_type=note_type,
+        topic=topic,
+    )
+
+    lexical_results = lexical_search(
+        conn,
+        query=query,
+        limit=limit,
+        note_type=note_type,
+        topic=topic,
+    )
+
+    return hybrid_search(
+        semantic_results,
+        lexical_results,
+        limit=limit,
     )

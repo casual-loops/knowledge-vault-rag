@@ -206,3 +206,68 @@ def test_answer_rejects_invalid_request() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_answer_uses_selected_retrieval_mode(monkeypatch) -> None:
+    called = {
+        "lexical": False,
+        "semantic": False,
+    }
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        lambda: SimpleNamespace(),
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_generation_provider",
+        lambda: FakeGenerationProvider(),
+    )
+
+    def fake_lexical_search(*args, **kwargs):
+        called["lexical"] = True
+        return []
+
+    def fake_semantic_search(*args, **kwargs):
+        called["semantic"] = True
+        return []
+
+    monkeypatch.setattr(
+        api_main,
+        "lexical_search",
+        fake_lexical_search,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "semantic_search",
+        fake_semantic_search,
+    )
+
+    response = client.post(
+        "/answer",
+        json={
+            "query": "Synthetic query",
+            "retrieval_mode": "lexical",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "",
+        "citations": [],
+        "sources": [],
+    }
+
+    assert called == {
+        "lexical": True,
+        "semantic": False,
+    }
