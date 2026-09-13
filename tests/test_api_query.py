@@ -407,3 +407,138 @@ def test_health_handles_database_failure(monkeypatch) -> None:
     assert response.json() == {
         "detail": "Service dependency unavailable."
     }
+
+
+def test_query_uses_lexical_retrieval(monkeypatch) -> None:
+    called = {
+        "lexical": False,
+        "semantic": False,
+    }
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        lambda: SimpleNamespace(),
+    )
+
+    def fake_lexical_search(*args, **kwargs):
+        called["lexical"] = True
+        return []
+
+    def fake_semantic_search(*args, **kwargs):
+        called["semantic"] = True
+        return []
+
+    monkeypatch.setattr(
+        api_main,
+        "lexical_search",
+        fake_lexical_search,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "semantic_search",
+        fake_semantic_search,
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "synthetic",
+            "retrieval_mode": "lexical",
+        },
+    )
+
+    assert response.status_code == 200
+    assert called == {
+        "lexical": True,
+        "semantic": False,
+    }
+
+
+def test_query_uses_hybrid_retrieval(monkeypatch) -> None:
+    semantic_result = SearchResult(
+        source_path="Semantic.md",
+        title="Semantic",
+        note_type="reference",
+        topic="demo",
+        ai_access="allowed",
+        chunk_index=0,
+        heading_path="Semantic",
+        content="Semantic content.",
+        score=0.9,
+        score_type="semantic",
+    )
+
+    lexical_result = SearchResult(
+        source_path="Lexical.md",
+        title="Lexical",
+        note_type="reference",
+        topic="demo",
+        ai_access="allowed",
+        chunk_index=0,
+        heading_path="Lexical",
+        content="Lexical content.",
+        score=0.8,
+        score_type="lexical",
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        lambda: SimpleNamespace(),
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "semantic_search",
+        lambda *args, **kwargs: [semantic_result],
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "lexical_search",
+        lambda *args, **kwargs: [lexical_result],
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "synthetic",
+            "retrieval_mode": "hybrid",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert len(body["results"]) == 2
+    assert all(
+        result["score_type"] == "hybrid"
+        for result in body["results"]
+    )
+
+
+def test_query_rejects_unsupported_retrieval_mode() -> None:
+    response = client.post(
+        "/query",
+        json={
+            "query": "synthetic",
+            "retrieval_mode": "unsupported",
+        },
+    )
+
+    assert response.status_code == 422

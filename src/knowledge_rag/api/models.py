@@ -1,15 +1,20 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
 class QueryRequest(BaseModel):
-    """Request body for semantic retrieval."""
+    """Request body for retrieval."""
 
     query: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=25)
     note_type: str | None = Field(default=None, min_length=1)
     topic: str | None = Field(default=None, min_length=1)
+    retrieval_mode: Literal[
+        "semantic",
+        "lexical",
+        "hybrid",
+    ] = "semantic"
 
 
 class QueryResult(BaseModel):
@@ -40,7 +45,11 @@ class GroundedQueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=25)
     note_type: str | None = Field(default=None, min_length=1)
     topic: str | None = Field(default=None, min_length=1)
-
+    retrieval_mode: Literal[
+        "semantic",
+        "lexical",
+        "hybrid",
+    ] = "semantic"
 
 class CitationResult(BaseModel):
     """Citation metadata returned with a grounded answer."""

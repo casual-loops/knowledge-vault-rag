@@ -184,6 +184,7 @@ class HybridSearchResult:
     heading_path: str | None
     content: str
     score: float
+    score_type: str = "hybrid"
 
 
 def hybrid_search(
