@@ -1,0 +1,126 @@
+{
+	"version": 1,
+	"relevance_scale": {
+		"3": "highly relevant",
+		"2": "relevant",
+		"1": "marginally relevant",
+		"0": "not relevant"
+	},
+	"cases": [
+		{
+			"id": "exact_azure_rbac",
+			"category": "exact-match",
+			"query": "Azure RBAC",
+			"retrieval_mode": "lexical",
+			"filters": {},
+			"relevant_chunks": [
+				{
+					"source_path": "20 Learning/Azure RBAC.md",
+					"chunk_index": 0,
+					"relevance": 3
+				}
+			]
+		},
+		{
+			"id": "semantic_least_privilege_scope",
+			"category": "semantic",
+			"query": "how should administrative permissions be limited to only the resources required",
+			"retrieval_mode": "semantic",
+			"filters": {},
+			"relevant_chunks": [
+				{
+					"source_path": "20 Learning/Azure RBAC.md",
+					"chunk_index": 0,
+					"relevance": 3
+				}
+			]
+		},
+		{
+			"id": "exact_monitoring_signals",
+			"category": "exact-match",
+			"query": "metrics logs checks alert thresholds",
+			"retrieval_mode": "lexical",
+			"filters": {},
+			"relevant_chunks": [
+				{
+					"source_path": "40 Reference/Monitoring Concepts.md",
+					"chunk_index": 0,
+					"relevance": 3
+				}
+			]
+		},
+		{
+			"id": "semantic_operational_health",
+			"category": "semantic",
+			"query": "how can operators identify unhealthy system states",
+			"retrieval_mode": "semantic",
+			"filters": {},
+			"relevant_chunks": [
+				{
+					"source_path": "40 Reference/Monitoring Concepts.md",
+					"chunk_index": 0,
+					"relevance": 3
+				}
+			]
+		},
+		{
+			"id": "hybrid_private_knowledge_assistant",
+			"category": "ambiguous",
+			"query": "private knowledge retrieval architecture",
+			"retrieval_mode": "hybrid",
+			"filters": {},
+			"relevant_chunks": [
+				{
+					"source_path": "30 Projects/Knowledge Assistant.md",
+					"chunk_index": 0,
+					"relevance": 3
+				},
+				{
+					"source_path": "40 Reference/Monitoring Concepts.md",
+					"chunk_index": 0,
+					"relevance": 1
+				}
+			]
+		},
+		{
+			"id": "filter_reference_privacy",
+			"category": "filtered",
+			"query": "external generation providers",
+			"retrieval_mode": "hybrid",
+			"filters": {
+				"note_type": "reference",
+				"topic": "privacy-demo"
+			},
+			"relevant_chunks": [
+				{
+					"source_path": "50 Privacy/Allowed Note.md",
+					"chunk_index": 0,
+					"relevance": 3
+				},
+				{
+					"source_path": "50 Privacy/Local Only Note.md",
+					"chunk_index": 0,
+					"relevance": 2
+				}
+			]
+		},
+		{
+			"id": "privacy_excluded_not_retrievable",
+			"category": "filtered",
+			"query": "must not enter the searchable index",
+			"retrieval_mode": "hybrid",
+			"filters": {
+				"topic": "privacy-demo"
+			},
+			"relevant_chunks": []
+		},
+		{
+			"id": "no_result_unrelated_domain",
+			"category": "no-result",
+			"query": "quantum submarine gardening protocol",
+			"retrieval_mode": "hybrid",
+			"filters": {},
+			"relevant_chunks": []
+		}
+	]
+}
