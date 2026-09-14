@@ -542,3 +542,215 @@ def test_query_rejects_unsupported_retrieval_mode() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_semantic_mode_preserves_filters(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        lambda: SimpleNamespace(),
+    )
+
+    def fake_semantic_search(
+        conn,
+        provider,
+        *,
+        query,
+        limit,
+        note_type,
+        topic,
+    ):
+        captured.update(
+            {
+                "query": query,
+                "limit": limit,
+                "note_type": note_type,
+                "topic": topic,
+            }
+        )
+        return []
+
+    monkeypatch.setattr(
+        api_main,
+        "semantic_search",
+        fake_semantic_search,
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "synthetic",
+            "retrieval_mode": "semantic",
+            "top_k": 7,
+            "note_type": "reference",
+            "topic": "privacy",
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert captured == {
+        "query": "synthetic",
+        "limit": 7,
+        "note_type": "reference",
+        "topic": "privacy",
+    }
+
+
+def test_lexical_mode_preserves_filters(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        lambda: SimpleNamespace(),
+    )
+
+    def fake_lexical_search(
+        conn,
+        *,
+        query,
+        limit,
+        note_type,
+        topic,
+    ):
+        captured.update(
+            {
+                "query": query,
+                "limit": limit,
+                "note_type": note_type,
+                "topic": topic,
+            }
+        )
+        return []
+
+    monkeypatch.setattr(
+        api_main,
+        "lexical_search",
+        fake_lexical_search,
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "synthetic",
+            "retrieval_mode": "lexical",
+            "top_k": 7,
+            "note_type": "reference",
+            "topic": "privacy",
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert captured == {
+        "query": "synthetic",
+        "limit": 7,
+        "note_type": "reference",
+        "topic": "privacy",
+    }
+
+
+def test_hybrid_mode_preserves_filters_for_both_retrievers(
+    monkeypatch,
+) -> None:
+    semantic_captured: dict[str, object] = {}
+    lexical_captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        api_main,
+        "get_connection",
+        fake_connection,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "get_embedding_provider",
+        lambda: SimpleNamespace(),
+    )
+
+    def fake_semantic_search(
+        conn,
+        provider,
+        *,
+        query,
+        limit,
+        note_type,
+        topic,
+    ):
+        semantic_captured.update(
+            {
+                "query": query,
+                "limit": limit,
+                "note_type": note_type,
+                "topic": topic,
+            }
+        )
+        return []
+
+    def fake_lexical_search(
+        conn,
+        *,
+        query,
+        limit,
+        note_type,
+        topic,
+    ):
+        lexical_captured.update(
+            {
+                "query": query,
+                "limit": limit,
+                "note_type": note_type,
+                "topic": topic,
+            }
+        )
+        return []
+
+    monkeypatch.setattr(
+        api_main,
+        "semantic_search",
+        fake_semantic_search,
+    )
+
+    monkeypatch.setattr(
+        api_main,
+        "lexical_search",
+        fake_lexical_search,
+    )
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "synthetic",
+            "retrieval_mode": "hybrid",
+            "top_k": 7,
+            "note_type": "reference",
+            "topic": "privacy",
+        },
+    )
+
+    assert response.status_code == 200
+
+    expected = {
+        "query": "synthetic",
+        "limit": 7,
+        "note_type": "reference",
+        "topic": "privacy",
+    }
+
+    assert semantic_captured == expected
+    assert lexical_captured == expected
