@@ -64,6 +64,8 @@ Workstation
 | API                   | FastAPI                                                                            | Retrieval and grounded answer APIs implemented |
 | Database              | PostgreSQL 17                                                                      | Operational in homelab                      |
 | Vector search         | pgvector 0.8.0                                                                     | Enabled                                     |
+| Lexical search        | PostgreSQL full-text search                                                        | Implemented                                 |
+| Hybrid ranking        | Reciprocal Rank Fusion                                                             | Implemented                                 |
 | Embeddings            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
 | Generation            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
 | Production runtime    | Dedicated Debian 13 LXC                                                            | Operational                                 |
@@ -112,14 +114,14 @@ Docker Compose remains available as a portable development option, but the activ
 - [x] Phase 8: Embedding pipeline and semantic retrieval
 - [x] Phase 9: FastAPI query service
 - [x] Phase 10: Grounded answer generation with citations
-- [ ] Phase 11: Hybrid lexical and vector search
+- [x] Phase 11: Hybrid lexical and vector search
 - [ ] Phase 12: Retrieval evaluation and regression tests
 - [ ] Phase 13: Production vault indexing
 - [ ] Phase 14: Web interface and operational hardening
 
 ## FastAPI Query Service
 
-The FastAPI service exposes semantic retrieval and grounded answer generation through a small JSON API.
+The FastAPI service exposes semantic, lexical, and hybrid retrieval together with grounded answer generation through a small JSON API.
 
 ### Health Endpoint
 
@@ -144,14 +146,15 @@ If a required dependency is unavailable, the service returns HTTP `503` with a g
 POST /query
 ```
 
-Example request:
+Example hybrid request:
 
 ```json
 {
   "query": "privacy controls for external AI use",
   "top_k": 5,
   "note_type": "reference",
-  "topic": "privacy-demo"
+  "topic": "privacy-demo",
+  "retrieval_mode": "hybrid"
 }
 ```
 
@@ -159,10 +162,19 @@ Request fields:
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `query` | Yes | Semantic search text. Must not be empty. |
+| `query` | Yes | Retrieval query text. Must not be empty. |
 | `top_k` | No | Maximum number of results. Defaults to `5`; allowed range is `1` through `25`. |
 | `note_type` | No | Filters results to a specific note type. |
 | `topic` | No | Filters results to a specific topic value. |
+| `retrieval_mode` | No | Selects `semantic`, `lexical`, or `hybrid`. Defaults to `semantic`. |
+
+Retrieval modes:
+
+- `semantic` uses vector similarity from pgvector.
+- `lexical` uses PostgreSQL full-text search over title, heading path, and chunk content.
+- `hybrid` combines semantic and lexical rankings with Reciprocal Rank Fusion.
+
+Hybrid search deduplicates the same chunk when it appears in both retrieval lists. Chunk identity is based on source path and chunk index. Ranking is deterministic, including deterministic tie-breaking.
 
 Example response:
 
@@ -178,7 +190,8 @@ Example response:
       "chunk_index": 0,
       "heading_path": "Allowed Note",
       "content": "Synthetic example content.",
-      "distance": 0.31
+      "score": 0.0325,
+      "score_type": "hybrid"
     }
   ]
 }
@@ -194,9 +207,12 @@ Returned source metadata includes:
 - chunk index
 - heading path
 - chunk content
-- vector distance
+- retrieval score
+- score type
 
-Invalid request bodies return HTTP `422`.
+Scores are higher-is-better within each retrieval mode. Semantic, lexical, and hybrid scores have different meanings and should not be compared across modes as if they shared one scale.
+
+Invalid request bodies, including unsupported retrieval modes, return HTTP `422`.
 
 Database, embedding-provider, or retrieval failures return HTTP `503` with a generic service error rather than exposing internal details.
 
@@ -206,7 +222,7 @@ Database, embedding-provider, or retrieval failures return HTTP `503` with a gen
 POST /answer
 ```
 
-The grounded answer endpoint performs semantic retrieval, applies generation privacy controls, builds bounded context, and returns a generated answer together with citation and source metadata.
+The grounded answer endpoint performs the selected retrieval mode, applies generation privacy controls, builds bounded context, and returns a generated answer together with citation and source metadata.
 
 Example request:
 
@@ -215,45 +231,12 @@ Example request:
   "query": "privacy controls for external AI use",
   "top_k": 5,
   "note_type": "reference",
-  "topic": "privacy-demo"
+  "topic": "privacy-demo",
+  "retrieval_mode": "hybrid"
 }
 ```
 
-The request supports the same query controls as semantic retrieval:
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `query` | Yes | Query text used for retrieval and grounded generation. Must not be empty. |
-| `top_k` | No | Maximum number of retrieved results. Defaults to `5`; allowed range is `1` through `25`. |
-| `note_type` | No | Filters retrieval to a specific note type. |
-| `topic` | No | Filters retrieval to a specific topic value. |
-
-Example response:
-
-```json
-{
-  "answer": "Synthetic grounded answer.",
-  "citations": [
-    {
-      "citation_id": "S1",
-      "source_path": "50 Privacy/Allowed Note.md",
-      "title": "Allowed Note",
-      "heading_path": "Allowed Note",
-      "chunk_index": 0
-    }
-  ],
-  "sources": [
-    {
-      "source_path": "50 Privacy/Allowed Note.md",
-      "title": "Allowed Note",
-      "heading_path": "Allowed Note",
-      "chunk_index": 0,
-      "content": "Synthetic example content.",
-      "ai_access": "allowed"
-    }
-  ]
-}
-```
+The request supports the same retrieval controls as `POST /query`.
 
 Citation identifiers are assigned in source order and are independent of the configured generation provider.
 
@@ -282,9 +265,11 @@ The production system is expected to add explicit policy controls so notes can b
 
 ## Status
 
-The infrastructure foundation, semantic retrieval pipeline, and grounded answer generation pipeline are operational.
+The infrastructure foundation, hybrid retrieval pipeline, and grounded answer generation pipeline are operational.
 
-The system can parse synthetic Markdown notes, enforce privacy-aware indexing and generation rules, persist documents and chunks in PostgreSQL, generate deterministic development embeddings, store vectors in pgvector, perform top-k semantic retrieval with metadata filtering, and expose both retrieval and grounded answer generation through FastAPI.
+The system can parse synthetic Markdown notes, enforce privacy-aware indexing and generation rules, persist documents and chunks in PostgreSQL, generate deterministic development embeddings, store vectors in pgvector, perform semantic and lexical retrieval with metadata filtering, combine rankings with Reciprocal Rank Fusion, and expose retrieval and grounded answer generation through FastAPI.
+
+Semantic, lexical, and hybrid retrieval remain independently selectable. Hybrid retrieval preserves source metadata and privacy state while deduplicating overlapping chunks.
 
 Grounded generation uses a provider abstraction with a deterministic local implementation for development and testing and an optional OpenAI adapter for external generation. Automated tests do not require live external API credentials.
 
@@ -292,4 +277,4 @@ Generated answers return stable citation identifiers together with vault-relativ
 
 External generation applies privacy filtering before prompt construction so `local-only` content is not transmitted to an external provider or exposed through generated-answer citations.
 
-The next software milestone is Phase 11: hybrid lexical and vector search.
+The next software milestone is Phase 12: retrieval evaluation and regression tests.
