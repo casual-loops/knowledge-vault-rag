@@ -34,7 +34,7 @@ External-provider credentials must remain outside source control and should only
 
 ## Threat model
 
-The primary privacy risk is unintended disclosure of private vault content through indexing, logging, embeddings, retrieval, generation context, generated answers, citations, public source control, API responses, or external APIs.
+The primary privacy risk is unintended disclosure of private vault content through indexing, logging, embeddings, retrieval, hybrid fusion, generation context, generated answers, citations, public source control, API responses, or external APIs.
 
 The system therefore assumes:
 
@@ -45,6 +45,7 @@ The system therefore assumes:
 - Application logs must not become an accidental secondary copy of note content.
 - API error responses must not expose secrets, connection details, raw exception text, or unintended note content.
 - Generated citations must only refer to source chunks actually permitted and used for generation.
+- Hybrid ranking must preserve source privacy state and must not reintroduce excluded content.
 - The public repository must never contain real private-vault data.
 
 ## Note-level AI access policy
@@ -94,11 +95,23 @@ Before chunk content is sent to an external embedding provider, external-use pol
 
 Only content explicitly permitted for external use may leave the local environment for embedding generation.
 
+### Retrieval and hybrid fusion boundary
+
+Semantic and lexical retrieval both operate over the indexed corpus and return persisted privacy metadata with each chunk.
+
+Metadata filters such as note type and topic are applied within each retrieval path before hybrid fusion.
+
+Hybrid retrieval combines rankings only from the result sets it receives. It does not query around or bypass retrieval filters.
+
+When the same chunk is returned by both semantic and lexical retrieval, it is deduplicated by vault-relative source path and chunk index. The fused result retains the source chunk's metadata, including `ai_access`.
+
+Reciprocal Rank Fusion changes ranking order only. It does not change whether a chunk is permitted for indexing, local retrieval, external embeddings, or external generation.
+
 ### Grounded generation gate
 
 Locally indexed content may still include `local-only` notes.
 
-Before retrieved chunks are assembled into context for an external generation model, generation policy is evaluated again.
+Before retrieved chunks are assembled into context for an external generation model, generation policy is evaluated again regardless of whether retrieval was semantic, lexical, or hybrid.
 
 Only content explicitly marked `allowed` may cross the external generation boundary.
 
@@ -132,7 +145,7 @@ The citation layer must not expose excluded content or content removed by extern
 
 The FastAPI service exposes retrieval results and grounded answers through explicit response models and validates request data before execution.
 
-Invalid request bodies are rejected with HTTP `422`.
+Callers may select `semantic`, `lexical`, or `hybrid` retrieval. Unsupported modes are rejected during request validation with HTTP `422`.
 
 Operational failures in database connectivity, embedding-provider setup, retrieval, generation-provider setup, or answer generation return HTTP `503` with generic error details.
 
@@ -156,6 +169,7 @@ Normal application logs may include operational metadata such as:
 - document UUID
 - indexing result
 - chunk count
+- retrieval mode
 - timing information
 - error type
 
@@ -178,10 +192,12 @@ When creating or importing a note:
 4. Use configured path or note-type exclusions for broad classes of content that should never be indexed.
 5. Treat missing `ai_access` as `local-only`.
 6. Validate exclusion rules before enabling ingestion of a real vault.
-7. Review external-provider policy before enabling embeddings or generation.
-8. Confirm grounded answers exclude `local-only` content before enabling external generation against real vault data.
-9. Keep the real vault, database contents, and runtime secrets outside the public repository.
-10. Verify API and health responses remain sanitized before exposing the service beyond trusted development access.
+7. Validate semantic, lexical, and hybrid retrieval against synthetic data before production use.
+8. Confirm hybrid fusion preserves filtering, deduplication, and `ai_access` state.
+9. Review external-provider policy before enabling embeddings or generation.
+10. Confirm grounded answers exclude `local-only` content before enabling external generation against real vault data.
+11. Keep the real vault, database contents, and runtime secrets outside the public repository.
+12. Verify API and health responses remain sanitized before exposing the service beyond trusted development access.
 
 ## Defense in depth
 
@@ -197,6 +213,8 @@ The system combines:
 - ingestion-time enforcement
 - persisted `ai_access` state
 - external embedding filtering
+- metadata filtering in semantic and lexical retrieval
+- privacy-state preservation through hybrid fusion
 - external generation filtering
 - bounded generation context
 - citation filtering based on used context
@@ -209,4 +227,4 @@ A failure at one layer should not automatically authorize disclosure at another.
 
 The assistant is allowed to derive from the vault. It is never the authoritative owner of the vault.
 
-The Markdown vault remains canonical, while indexes, embeddings, generated answers, and citations are derived and rebuildable or reproducible outputs.
+The Markdown vault remains canonical, while indexes, embeddings, retrieval rankings, generated answers, and citations are derived and rebuildable or reproducible outputs.
