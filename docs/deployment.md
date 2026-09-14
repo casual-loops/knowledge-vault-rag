@@ -16,9 +16,11 @@ The container hosts:
 
 - PostgreSQL 17
 - pgvector 0.8.0
+- PostgreSQL full-text search
 - the `knowledge_rag` application database and restricted application role
 - Python application code
 - ingestion and retrieval components
+- hybrid ranking components
 - grounded answer generation components
 - the FastAPI query service
 
@@ -53,28 +55,40 @@ The current health check verifies database connectivity. If the database is unav
 
 ## Query behavior
 
-`POST /query` accepts semantic search text and optional retrieval controls:
+`POST /query` accepts query text and optional retrieval controls:
 
 - `top_k`, default 5, allowed range 1 through 25
 - `note_type`
 - `topic`
+- `retrieval_mode`, one of `semantic`, `lexical`, or `hybrid`, default `semantic`
 
-The API delegates to the existing retrieval layer and returns source-aware chunk metadata.
+Retrieval modes behave as follows:
 
-Invalid requests return HTTP 422. Operational failures in database access, embedding-provider setup, or retrieval return HTTP 503 with generic error details.
+- `semantic` uses vector similarity through pgvector.
+- `lexical` uses PostgreSQL full-text search and does not require embeddings.
+- `hybrid` runs both retrieval paths and combines their rankings with Reciprocal Rank Fusion.
+
+Hybrid retrieval deduplicates overlapping chunks by source path and chunk index while preserving metadata and privacy state.
+
+The response schema is consistent across retrieval modes and includes a higher-is-better `score` plus `score_type` indicating the active retrieval strategy.
+
+Scores from different modes should not be interpreted as sharing the same numeric scale.
+
+Invalid requests, including unsupported retrieval modes, return HTTP 422. Operational failures in database access, embedding-provider setup, or retrieval return HTTP 503 with generic error details.
 
 ## Grounded answer behavior
 
-`POST /answer` accepts the same query controls as `POST /query` and reuses the semantic retrieval layer before invoking grounded generation.
+`POST /answer` accepts the same retrieval controls as `POST /query` and performs the selected retrieval strategy before invoking grounded generation.
 
 The grounded generation pipeline:
 
-1. converts retrieval results into policy-aware source chunks
-2. applies generation privacy policy
-3. removes `local-only` chunks before external generation
-4. builds bounded context
-5. invokes the configured generation provider
-6. returns the answer with stable citations and the source chunks actually used
+1. runs semantic, lexical, or hybrid retrieval as requested
+2. converts retrieval results into policy-aware source chunks
+3. applies generation privacy policy
+4. removes `local-only` chunks before external generation
+5. builds bounded context
+6. invokes the configured generation provider
+7. returns the answer with stable citations and the source chunks actually used
 
 Citation metadata includes:
 
@@ -96,7 +110,26 @@ Generation is abstracted behind a provider interface.
 
 The deterministic local provider supports development and automated testing without external credentials. The optional OpenAI adapter is selected only when the required runtime configuration is present.
 
+Lexical retrieval remains available without an embedding provider. Semantic and hybrid modes require the configured embedding path because both include vector retrieval.
+
 External provider configuration belongs in local runtime configuration such as `.env` and must not be committed.
+
+## Troubleshooting retrieval
+
+When retrieval results appear unexpected, isolate the retrieval modes before changing ranking behavior.
+
+1. Run the same query in `semantic` mode.
+2. Run the same query in `lexical` mode.
+3. Compare the source paths and chunk indexes returned by each mode.
+4. Run the query in `hybrid` mode and confirm overlapping chunks appear only once.
+5. Confirm `note_type`, `topic`, and `top_k` controls are identical across test requests.
+6. Check `score_type` before interpreting a score value.
+
+If lexical mode returns expected exact-keyword matches but semantic mode does not, inspect embedding generation and vector indexing.
+
+If semantic mode returns relevant conceptual matches but lexical mode does not, verify the expected terms are actually present in indexed title, heading, or chunk content.
+
+If hybrid ordering is unexpected, remember that Reciprocal Rank Fusion combines rank positions rather than raw retrieval scores. A chunk ranked highly by both retrievers can outrank a chunk ranked first by only one retriever.
 
 ## Vault data path
 
@@ -135,4 +168,4 @@ Before production vault indexing, complete these infrastructure tasks:
 
 ## Next software milestone
 
-Phase 10 is complete. The next software milestone is Phase 11: hybrid lexical and vector search.
+Phase 11 is complete. The next software milestone is Phase 12: retrieval evaluation and regression tests.
