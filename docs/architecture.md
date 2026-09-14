@@ -30,33 +30,65 @@ Frontmatter parser
 Chunker
     |
     v
-Embedding provider
-    |
-    v
 PostgreSQL + pgvector
     |
-    v
-Semantic retriever
+    +--> semantic retriever
     |
-    +--> POST /query
-    |
-    +--> Grounded generation pipeline
+    +--> lexical retriever
             |
-            +--> generation policy filter
+            v
+      reciprocal rank fusion
             |
-            +--> bounded context builder
+            v
+       hybrid retriever
             |
-            +--> generation provider
+            +--> POST /query
             |
-            +--> citation mapper
+            +--> Grounded generation pipeline
                     |
-                    v
-                POST /answer
+                    +--> generation policy filter
+                    |
+                    +--> bounded context builder
+                    |
+                    +--> generation provider
+                    |
+                    +--> citation mapper
+                            |
+                            v
+                        POST /answer
 ```
+
+## Retrieval modes
+
+The retrieval layer supports three independently callable modes.
+
+### Semantic retrieval
+
+Semantic retrieval embeds the query and ranks indexed chunks using pgvector similarity.
+
+Semantic result scores are normalized to a higher-is-better representation before they leave the retrieval layer.
+
+### Lexical retrieval
+
+Lexical retrieval uses PostgreSQL full-text search over document title, heading path, and chunk content.
+
+It does not require an embedding provider and can be called independently from vector search.
+
+### Hybrid retrieval
+
+Hybrid retrieval combines the ranked semantic and lexical result lists with Reciprocal Rank Fusion.
+
+RRF uses rank position rather than attempting to compare raw semantic and lexical scores directly. For each chunk, contributions from every list where it appears are summed using the reciprocal-rank formula.
+
+The implementation uses a smoothing constant and deterministic tie-breaking. A chunk appearing in both retrieval paths is deduplicated and receives contributions from both rankings.
+
+Chunk identity is defined by vault-relative source path plus chunk index.
+
+Source metadata and `ai_access` state are preserved through fusion.
 
 ## FastAPI query flow
 
-The retrieval API validates requests and delegates search to the existing semantic retrieval layer.
+The API validates requests and delegates to the selected retrieval mode.
 
 ```text
 Client
@@ -68,28 +100,32 @@ POST /query
 Pydantic validation
   |
   v
-Configured embedding provider
+retrieval_mode
   |
-  v
-Database connection
+  +--> semantic_search()
   |
-  v
-semantic_search()
+  +--> lexical_search()
   |
-  v
-pgvector similarity search
-  |
-  v
-QueryResponse
+  +--> semantic_search() + lexical_search()
+            |
+            v
+      hybrid_search()
+            |
+            v
+        QueryResponse
 ```
 
-Supported controls are `query`, `top_k`, `note_type`, and `topic`. The result limit defaults to 5 and is bounded from 1 through 25.
+Supported controls are `query`, `top_k`, `note_type`, `topic`, and `retrieval_mode`. The result limit defaults to 5 and is bounded from 1 through 25.
 
-Each result includes source path, title, note type, topic, effective AI access policy, chunk index, heading path, chunk content, and vector distance.
+`retrieval_mode` accepts `semantic`, `lexical`, or `hybrid` and defaults to `semantic`.
+
+Each result includes source path, title, note type, topic, effective AI access policy, chunk index, heading path, chunk content, score, and score type.
+
+Scores are meaningful within their retrieval mode. They are not intended for cross-mode comparison.
 
 ## Grounded answer flow
 
-The grounded answer endpoint reuses semantic retrieval, converts retrieved results into policy-aware source chunks, and delegates answer construction to the grounded generation pipeline.
+The grounded answer endpoint uses the same retrieval selection before converting results into policy-aware source chunks.
 
 ```text
 Client
@@ -101,10 +137,7 @@ POST /answer
 Pydantic validation
   |
   v
-Configured embedding provider
-  |
-  v
-semantic_search()
+Selected retrieval mode
   |
   v
 RetrievedChunk conversion
@@ -145,13 +178,15 @@ Provider-specific SDK behavior is kept outside retrieval, grounding, citation, a
 
 The generation provider exposes whether it is external so the grounded pipeline can enforce external-use policy without hard-coding a specific vendor.
 
+Lexical retrieval is intentionally independent of the embedding provider.
+
 ## Health and error behavior
 
 `GET /health` validates database connectivity in addition to application availability.
 
 A healthy dependency check returns HTTP 200. Database dependency failures return HTTP 503 with a generic response.
 
-Invalid request bodies return HTTP 422. Database, embedding-provider, retrieval, generation-provider, and generation failures return HTTP 503 with generic service errors.
+Invalid request bodies, including unsupported retrieval modes, return HTTP 422. Database, embedding-provider, retrieval, generation-provider, and generation failures return HTTP 503 with generic service errors.
 
 ## Trust boundaries
 
@@ -167,11 +202,13 @@ This repository contains only code, sanitized configuration examples, synthetic 
 
 Only the minimum retrieved context required for a query should be sent to external embedding or generation APIs. Privacy controls are enforced before indexing and again before externally permitted model use. Notes may be excluded by path, note type, or `ai_access` policy, and `local-only` content must remain inside the local environment.
 
+Hybrid fusion does not relax privacy state. Fused results retain the same `ai_access` metadata as their source chunks.
+
 For grounded generation, external-use filtering occurs before prompt construction, provider invocation, citation creation, and source return mapping.
 
 ## Deployment model
 
-The production-oriented runtime is a lightweight Linux container hosting PostgreSQL, pgvector, ingestion components, retrieval logic, grounded generation logic, and FastAPI.
+The production-oriented runtime is a lightweight Linux container hosting PostgreSQL, pgvector, ingestion components, semantic retrieval, lexical retrieval, hybrid ranking, grounded generation logic, and FastAPI.
 
 External inference remains optional. Deterministic local providers support development and testing without paid API access, while external providers can be enabled through runtime configuration.
 
@@ -179,6 +216,6 @@ The FastAPI service can run from the development workstation while connecting to
 
 ## Source of truth
 
-The vector database is a derived index. If it is lost or corrupted, it should be possible to recreate it entirely from the vault replica.
+The search index is a derived structure. If it is lost or corrupted, it should be possible to recreate it entirely from the vault replica.
 
 Generated answers and citations are also derived output. They do not replace the underlying Markdown source notes as the authoritative record.
