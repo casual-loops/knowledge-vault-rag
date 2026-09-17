@@ -168,6 +168,22 @@ Each citation can include vault-relative source path, title, heading path, and c
 
 If no usable generation context remains after retrieval and policy filtering, generation is skipped and the service returns an empty answer with empty citation and source lists.
 
+## Retrieval evaluation subsystem
+
+Retrieval quality is evaluated against a public-safe synthetic dataset stored in `evaluation/retrieval_cases.json`.
+
+Each case identifies the query, retrieval mode, optional filters, and expected relevant chunks. Relevant chunks use the same stable source-path and chunk-index identity used by the retrieval layer.
+
+The evaluation subsystem calculates precision at K, recall at K, and reciprocal rank for each case. Aggregate summaries are produced by retrieval mode so semantic, lexical, and hybrid behavior can be reviewed independently.
+
+The runner in `scripts/evaluate_retrieval.py` records per-query rankings, writes deterministic JSON output, and prints a concise summary. Regression floors are configured separately in `evaluation/thresholds.json`.
+
+Threshold checks can fail the evaluation command when configured mode-level or case-level minimums are breached. Threshold configuration is intentionally separate from retrieval implementation so baseline changes remain explicit and reviewable.
+
+Unit coverage for the evaluation framework uses deterministic fixtures and does not require paid or nondeterministic providers.
+
+Detailed methodology, metric definitions, threshold guidance, local execution instructions, and known limitations are documented in `docs/retrieval-evaluation.md`.
+
 ## Provider model
 
 Embedding and generation providers are selected through application configuration.
@@ -205,6 +221,8 @@ Only the minimum retrieved context required for a query should be sent to extern
 Hybrid fusion does not relax privacy state. Fused results retain the same `ai_access` metadata as their source chunks.
 
 For grounded generation, external-use filtering occurs before prompt construction, provider invocation, citation creation, and source return mapping.
+
+Evaluation fixtures in the public repository must remain synthetic and sanitized. Production or private-vault evaluation data must remain outside the public repository and follow the same trust boundary as the source vault.
 
 ## Deployment model
 
