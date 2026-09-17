@@ -48,7 +48,7 @@ def persist_note(
 
     source_path = note_path.resolve().relative_to(vault_path.resolve()).as_posix()
     document_uuid = document_identity(vault_path, note_path)
-    digest = content_hash(document.content)
+    digest = content_hash(document.content, document.metadata)
 
     existing = conn.execute(
         """

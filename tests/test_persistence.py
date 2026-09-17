@@ -324,6 +324,78 @@ This note may be used with external model providers.
     assert row is not None
     assert row[0] == "allowed"
 
+
+def test_metadata_only_changes_update_existing_document(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir()
+
+    note_path = vault_path / "Identity.md"
+    note_path.write_text(
+        """---
+type: reference
+status: draft
+ai_access: local-only
+topic:
+  - identity
+---
+
+# Identity
+
+The body remains unchanged while frontmatter changes.
+""",
+        encoding="utf-8",
+    )
+
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+
+        first_result = persist_note(conn, vault_path, note_path)
+
+        note_path.write_text(
+            """---
+type: guide
+status: active
+ai_access: allowed
+topic:
+  - access-control
+---
+
+# Identity
+
+The body remains unchanged while frontmatter changes.
+""",
+            encoding="utf-8",
+        )
+
+        second_result = persist_note(conn, vault_path, note_path)
+        third_result = persist_note(conn, vault_path, note_path)
+
+        rows = conn.execute(
+            """
+            SELECT note_type, status, ai_access, metadata
+            FROM documents
+            WHERE source_path = %s;
+            """,
+            ("Identity.md",),
+        ).fetchall()
+
+    assert first_result is PersistResult.INDEXED
+    assert second_result is PersistResult.INDEXED
+    assert third_result is PersistResult.UNCHANGED
+    assert rows == [
+        (
+            "guide",
+            "active",
+            "allowed",
+            {
+                "type": "guide",
+                "status": "active",
+                "ai_access": "allowed",
+                "topic": ["access-control"],
+            },
+        )
+    ]
+
 def test_changed_document_chunks_are_reembedded(tmp_path: Path) -> None:
     vault_path = tmp_path / "vault"
     vault_path.mkdir()
