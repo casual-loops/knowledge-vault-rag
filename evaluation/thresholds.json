@@ -1,0 +1,24 @@
+{
+	"version": 1,
+	"mode_thresholds": {
+		"semantic": {
+			"mean_precision_at_k": 0.4,
+			"mean_recall_at_k": 0.6,
+			"mean_reciprocal_rank": 0.6
+		},
+		"lexical": {
+			"mean_precision_at_k": 0.4,
+			"mean_recall_at_k": 0.6,
+			"mean_reciprocal_rank": 0.6
+		},
+		"hybrid": {
+			"mean_precision_at_k": 0.4,
+			"mean_recall_at_k": 0.6,
+			"mean_reciprocal_rank": 0.6
+		}
+	},
+	"case_thresholds": {
+		"minimum_recall_at_k": 0.0,
+		"minimum_reciprocal_rank": 0.0
+	}
+}

@@ -13,7 +13,10 @@ from knowledge_rag.evaluation_runner import (
     run_evaluation,
     write_evaluation_output,
 )
-
+from knowledge_rag.evaluation_thresholds import (
+    check_thresholds,
+    load_thresholds,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +30,12 @@ DEFAULT_OUTPUT = (
     REPO_ROOT
     / "evaluation"
     / "results.json"
+)
+
+DEFAULT_THRESHOLDS = (
+    REPO_ROOT
+    / "evaluation"
+    / "thresholds.json"
 )
 
 
@@ -51,6 +60,12 @@ def parse_args() -> argparse.Namespace:
         "--k",
         type=int,
         default=5,
+    )
+
+    parser.add_argument(
+    "--thresholds",
+    type=Path,
+    default=DEFAULT_THRESHOLDS,
     )
 
     return parser.parse_args()
@@ -90,6 +105,16 @@ def main() -> None:
         k=args.k,
     )
 
+    thresholds = load_thresholds(
+        args.thresholds,
+        )
+    
+    threshold_check = check_thresholds(
+            results=run.results,
+            summaries=run.summaries,
+            thresholds=thresholds,
+        )
+
     write_evaluation_output(
         run,
         args.output,
@@ -100,6 +125,24 @@ def main() -> None:
             run,
         )
     )
+
+    if not threshold_check.passed:
+        print()
+        print("Retrieval quality regression detected.")
+
+        for failure in threshold_check.failures:
+            print(
+                (  # noqa: UP034
+                    f"{failure.scope} "
+                    f"{failure.identifier}: "
+                    f"{failure.metric}="
+                    f"{failure.actual:.3f} "
+                    f"below minimum "
+                    f"{failure.minimum:.3f}"
+                )
+            )
+
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
