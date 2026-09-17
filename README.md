@@ -66,6 +66,7 @@ Workstation
 | Vector search         | pgvector 0.8.0                                                                     | Enabled                                     |
 | Lexical search        | PostgreSQL full-text search                                                        | Implemented                                 |
 | Hybrid ranking        | Reciprocal Rank Fusion                                                             | Implemented                                 |
+| Retrieval evaluation  | Synthetic relevance judgments, metrics, runner, and regression thresholds         | Implemented                                 |
 | Embeddings            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
 | Generation            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
 | Production runtime    | Dedicated Debian 13 LXC                                                            | Operational                                 |
@@ -80,13 +81,14 @@ The real private vault is not used for development ingestion yet. Development co
 examples/sample-vault/
 ```
 
-This keeps parser, chunking, database persistence, and privacy behavior testable before any real personal data is indexed.
+This keeps parser, chunking, database persistence, privacy behavior, retrieval behavior, and evaluation reproducible before any real personal data is indexed.
 
 ## Repository layout
 
 ```text
 .
 ├── docs/
+├── evaluation/
 ├── examples/sample-vault/
 ├── infrastructure/
 ├── scripts/
@@ -115,7 +117,7 @@ Docker Compose remains available as a portable development option, but the activ
 - [x] Phase 9: FastAPI query service
 - [x] Phase 10: Grounded answer generation with citations
 - [x] Phase 11: Hybrid lexical and vector search
-- [ ] Phase 12: Retrieval evaluation and regression tests
+- [x] Phase 12: Retrieval evaluation and regression tests
 - [ ] Phase 13: Production vault indexing
 - [ ] Phase 14: Web interface and operational hardening
 
@@ -197,18 +199,7 @@ Example response:
 }
 ```
 
-Returned source metadata includes:
-
-- vault-relative source path
-- title
-- note type
-- topic
-- effective AI access policy
-- chunk index
-- heading path
-- chunk content
-- retrieval score
-- score type
+Returned source metadata includes vault-relative source path, title, note type, topic, effective AI access policy, chunk index, heading path, chunk content, retrieval score, and score type.
 
 Scores are higher-is-better within each retrieval mode. Semantic, lexical, and hybrid scores have different meanings and should not be compared across modes as if they shared one scale.
 
@@ -248,6 +239,22 @@ Invalid request bodies return HTTP `422`.
 
 Retrieval, embedding-provider, generation-provider, database, or generation failures return HTTP `503` with a generic service error that does not expose note content, credentials, connection information, or internal exception text.
 
+## Retrieval Evaluation
+
+Phase 12 adds a deterministic evaluation framework for semantic, lexical, and hybrid retrieval.
+
+The public-safe evaluation dataset and relevance judgments live in `evaluation/retrieval_cases.json`. Retrieval quality is measured with precision at K, recall at K, and reciprocal rank. The evaluation runner records per-query rankings, produces aggregate summaries by retrieval mode, writes deterministic JSON output, and checks explicit regression floors from `evaluation/thresholds.json`.
+
+Run the evaluation from the repository root with:
+
+```powershell
+python scripts/evaluate_retrieval.py
+```
+
+If configured regression thresholds are breached, the command reports the affected case or retrieval mode and exits with a nonzero status.
+
+Detailed methodology, metric definitions, threshold guidance, update process, and limitations are documented in `docs/retrieval-evaluation.md`.
+
 ## Infrastructure follow-up
 
 The RAG container is operational, but two infrastructure controls remain open before the service is considered production-ready:
@@ -261,15 +268,19 @@ The real vault is intentionally excluded from this project. Never commit real jo
 
 Use `examples/sample-vault/` for synthetic or deliberately sanitized demonstration content.
 
+Public evaluation fixtures must also remain synthetic and sanitized. Private evaluation cases for the production vault belong outside this public repository.
+
 The production system is expected to add explicit policy controls so notes can be excluded from indexing or restricted from being sent to external model APIs.
 
 ## Status
 
-The infrastructure foundation, hybrid retrieval pipeline, and grounded answer generation pipeline are operational.
+The infrastructure foundation, hybrid retrieval pipeline, grounded answer generation pipeline, and deterministic retrieval evaluation framework are operational.
 
 The system can parse synthetic Markdown notes, enforce privacy-aware indexing and generation rules, persist documents and chunks in PostgreSQL, generate deterministic development embeddings, store vectors in pgvector, perform semantic and lexical retrieval with metadata filtering, combine rankings with Reciprocal Rank Fusion, and expose retrieval and grounded answer generation through FastAPI.
 
 Semantic, lexical, and hybrid retrieval remain independently selectable. Hybrid retrieval preserves source metadata and privacy state while deduplicating overlapping chunks.
+
+Retrieval quality can be evaluated against synthetic relevance judgments with precision at K, recall at K, reciprocal rank, per-query rankings, aggregate mode summaries, and configurable regression thresholds. Automated evaluation tests do not require paid or nondeterministic providers.
 
 Grounded generation uses a provider abstraction with a deterministic local implementation for development and testing and an optional OpenAI adapter for external generation. Automated tests do not require live external API credentials.
 
@@ -277,4 +288,4 @@ Generated answers return stable citation identifiers together with vault-relativ
 
 External generation applies privacy filtering before prompt construction so `local-only` content is not transmitted to an external provider or exposed through generated-answer citations.
 
-The next software milestone is Phase 12: retrieval evaluation and regression tests.
+The next software milestone is Phase 13: production vault indexing.
