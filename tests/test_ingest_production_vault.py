@@ -1,35 +1,116 @@
 from pathlib import Path
 
 import scripts.ingest_production_vault as runner
-from knowledge_rag.ingest.persistence import PersistResult
 from knowledge_rag.ingestion_config import IngestionConfig
+from knowledge_rag.production_ingestion import (
+    NoteFailure,
+    ProductionIngestionSummary,
+)
 
 
-def test_production_runner_uses_configured_vault_path(
-    tmp_path,
+def make_summary(
+    *,
+    failures: tuple[NoteFailure, ...] = (),
+) -> ProductionIngestionSummary:
+    return ProductionIngestionSummary(
+        discovered=3,
+        indexed=1,
+        unchanged=1,
+        excluded=0,
+        reactivated=0,
+        inactivated=1,
+        embedded=2,
+        failures=failures,
+        reconciliation_completed=not failures,
+        embedding_error=None,
+    )
+
+
+def test_production_runner_completes_pipeline_and_returns_zero(
+    tmp_path: Path,
     monkeypatch,
+    capsys,
 ) -> None:
-    vault_path = (
-        tmp_path
-        / "production-vault"
-    ).resolve()
-
-    vault_path.mkdir()
-
-    note_path = (
-        vault_path
-        / "Note.md"
-    )
-
-    note_path.write_text(
-        "# Synthetic note",
-        encoding="utf-8",
-    )
-
+    vault_path = (tmp_path / "production-vault").resolve()
     config = IngestionConfig(
         vault_path=vault_path,
         production=True,
         production_opt_in=True,
+    )
+    provider = object()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        runner,
+        "get_production_ingestion_config",
+        lambda: calls.append("config") or config,
+    )
+    monkeypatch.setattr(
+        runner,
+        "get_embedding_provider",
+        lambda: calls.append("provider") or provider,
+    )
+
+    class FakeConnection:
+        def __enter__(self):
+            calls.append("connection")
+            return self
+
+        def __exit__(
+            self,
+            exc_type,
+            exc,
+            traceback,
+        ) -> None:
+            return None
+
+    connection = FakeConnection()
+    monkeypatch.setattr(
+        runner,
+        "get_connection",
+        lambda: connection,
+    )
+
+    def fake_run(
+        received_connection,
+        received_config,
+        received_provider,
+    ) -> ProductionIngestionSummary:
+        calls.append("orchestrator")
+        assert received_connection is connection
+        assert received_config is config
+        assert received_provider is provider
+        return make_summary()
+
+    monkeypatch.setattr(
+        runner,
+        "run_production_ingestion",
+        fake_run,
+    )
+
+    assert runner.main() == 0
+    assert calls == [
+        "config",
+        "provider",
+        "connection",
+        "orchestrator",
+    ]
+    assert "complete: true" in capsys.readouterr().out
+
+
+def test_production_runner_reports_safe_incomplete_failure(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    vault_path = (tmp_path / "private-vault").resolve()
+    config = IngestionConfig(
+        vault_path=vault_path,
+        production=True,
+        production_opt_in=True,
+    )
+    incomplete = make_summary(
+        failures=(NoteFailure("Broken.md", "ValueError"),),
     )
 
     monkeypatch.setattr(
@@ -37,37 +118,7 @@ def test_production_runner_uses_configured_vault_path(
         "get_production_ingestion_config",
         lambda: config,
     )
-
-    monkeypatch.setattr(
-        runner,
-        "discover_markdown_files",
-        lambda path: [note_path],
-    )
-
-    persisted: list[
-        tuple[object, Path, Path]
-    ] = []
-
-    def fake_persist_note(
-        conn,
-        received_vault_path: Path,
-        received_note_path: Path,
-    ) -> PersistResult:
-        persisted.append(
-            (
-                conn,
-                received_vault_path,
-                received_note_path,
-            )
-        )
-
-        return PersistResult.INDEXED
-
-    monkeypatch.setattr(
-        runner,
-        "persist_note",
-        fake_persist_note,
-    )
+    monkeypatch.setattr(runner, "get_embedding_provider", object)
 
     class FakeConnection:
         def __enter__(self):
@@ -81,26 +132,55 @@ def test_production_runner_uses_configured_vault_path(
         ) -> None:
             return None
 
-    connection = FakeConnection()
-
     monkeypatch.setattr(
         runner,
         "get_connection",
-        lambda: connection,
+        FakeConnection,
     )
+    monkeypatch.setattr(
+        runner,
+        "run_production_ingestion",
+        lambda conn, received_config, provider: incomplete,
+    )
+
+    assert runner.main() == 1
+
+    output = capsys.readouterr().out
+    assert "complete: false" in output
+    assert "failure: Broken.md: ValueError" in output
+    assert str(vault_path) not in output
+
+
+def test_production_runner_loads_configuration_before_other_factories(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    def fail_config() -> IngestionConfig:
+        calls.append("config")
+        raise ValueError("Production ingestion is disabled")
 
     monkeypatch.setattr(
         runner,
-        "safe_note_reference",
-        lambda vault, note: "Note.md",
+        "get_production_ingestion_config",
+        fail_config,
+    )
+    monkeypatch.setattr(
+        runner,
+        "get_embedding_provider",
+        lambda: calls.append("provider"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "get_connection",
+        lambda: calls.append("connection"),
     )
 
-    runner.main()
+    try:
+        runner.main()
+    except ValueError as exc:
+        assert str(exc) == "Production ingestion is disabled"
+    else:
+        raise AssertionError("Expected production configuration failure")
 
-    assert persisted == [
-        (
-            connection,
-            vault_path,
-            note_path,
-        )
-    ]
+    assert calls == ["config"]

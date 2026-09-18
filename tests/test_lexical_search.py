@@ -99,6 +99,15 @@ def test_lexical_search_uses_postgres_full_text_search() -> None:
     assert "ts_rank_cd" in conn.executed_sql
 
 
+def test_lexical_search_requires_active_documents() -> None:
+    conn: Any = FakeConnection([])
+
+    lexical_search(conn, query="synthetic")
+
+    assert conn.executed_sql is not None
+    assert "d.is_active = TRUE" in conn.executed_sql
+
+
 def test_lexical_search_returns_empty_list_when_no_matches() -> None:
     conn: Any = FakeConnection([])
 

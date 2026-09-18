@@ -5,9 +5,13 @@ from tempfile import TemporaryDirectory
 import psycopg
 
 from knowledge_rag.config import settings
-from knowledge_rag.ingest.persistence import PersistResult, persist_note
-from knowledge_rag.embeddings import DeterministicEmbeddingProvider
 from knowledge_rag.embedding_store import embed_missing_chunks
+from knowledge_rag.embeddings import DeterministicEmbeddingProvider
+from knowledge_rag.ingest.persistence import (
+    PersistResult,
+    persist_note,
+    reconcile_inactive_documents,
+)
 
 
 def create_test_tables(conn: psycopg.Connection) -> None:
@@ -24,6 +28,7 @@ def create_test_tables(conn: psycopg.Connection) -> None:
             ai_access TEXT NOT NULL DEFAULT 'local-only',
             metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
             content_hash TEXT NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
             indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """
@@ -490,3 +495,235 @@ Changed content that requires a new embedding.
         assert second_embedded_count > 0
         assert final_row is not None
         assert final_row[0] is True
+
+
+class FailingEmbeddingProvider:
+    """Embedding provider that fails if ineligible content reaches it."""
+
+    def embed(self, text: str) -> list[float]:
+        raise AssertionError("Inactive documents must not be embedded.")
+
+
+def test_inactive_allowed_document_is_not_embedded(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir()
+    note_path = vault_path / "Inactive.md"
+    note_path.write_text(
+        """---
+type: note
+ai_access: allowed
+---
+
+# Inactive
+
+This content must not reach an embedding provider.
+""",
+        encoding="utf-8",
+    )
+
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+        assert persist_note(conn, vault_path, note_path) is PersistResult.INDEXED
+        conn.execute(
+            "UPDATE documents SET is_active = FALSE WHERE source_path = 'Inactive.md';"
+        )
+
+        embedded_count = embed_missing_chunks(conn, FailingEmbeddingProvider())
+
+    assert embedded_count == 0
+
+
+def test_persist_note_reactivates_unchanged_document_without_rebuilding_chunks(
+    tmp_path: Path,
+) -> None:
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir()
+    note_path = vault_path / "Restored.md"
+    note_path.write_text(
+        """---
+type: note
+ai_access: allowed
+---
+
+# Restored
+
+This document returns with unchanged content and metadata.
+""",
+        encoding="utf-8",
+    )
+
+    provider = DeterministicEmbeddingProvider(dimensions=1536)
+
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+        assert persist_note(conn, vault_path, note_path) is PersistResult.INDEXED
+        assert embed_missing_chunks(conn, provider) == 1
+
+        original = conn.execute(
+            """
+            SELECT d.document_id, c.chunk_id, c.embedding
+            FROM documents d
+            JOIN document_chunks c ON c.document_id = d.document_id
+            WHERE d.source_path = 'Restored.md';
+            """
+        ).fetchone()
+        assert original is not None
+
+        conn.execute(
+            "UPDATE documents SET is_active = FALSE WHERE source_path = 'Restored.md';"
+        )
+
+        result = persist_note(conn, vault_path, note_path)
+        restored = conn.execute(
+            """
+            SELECT d.document_id, c.chunk_id, c.embedding, d.is_active
+            FROM documents d
+            JOIN document_chunks c ON c.document_id = d.document_id
+            WHERE d.source_path = 'Restored.md';
+            """
+        ).fetchone()
+
+    assert result is PersistResult.REACTIVATED
+    assert restored is not None
+    assert restored[0] == original[0]
+    assert restored[1] == original[1]
+    assert restored[2] == original[2]
+    assert restored[3] is True
+
+
+def test_excluded_ai_access_deactivates_existing_document(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir()
+    note_path = vault_path / "Policy.md"
+    note_path.write_text(
+        """---
+type: note
+ai_access: allowed
+---
+
+# Policy
+
+This note starts as externally eligible.
+""",
+        encoding="utf-8",
+    )
+
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+        assert persist_note(conn, vault_path, note_path) is PersistResult.INDEXED
+
+        note_path.write_text(
+            """---
+type: note
+ai_access: exclude
+---
+
+# Policy
+
+This note starts as externally eligible.
+""",
+            encoding="utf-8",
+        )
+        result = persist_note(conn, vault_path, note_path)
+        stored = conn.execute(
+            "SELECT is_active FROM documents WHERE source_path = 'Policy.md';"
+        ).fetchone()
+
+    assert result is PersistResult.EXCLUDED
+    assert stored == (False,)
+
+
+def test_excluded_path_deactivates_existing_document(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    vault_path = tmp_path / "vault"
+    note_path = vault_path / "Private" / "Policy.md"
+    note_path.parent.mkdir(parents=True)
+    note_path.write_text(
+        """---
+type: note
+ai_access: allowed
+---
+
+# Policy
+
+This note is later excluded by path policy.
+""",
+        encoding="utf-8",
+    )
+
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+        assert persist_note(conn, vault_path, note_path) is PersistResult.INDEXED
+
+        monkeypatch.setattr(settings, "excluded_paths", ("Private",))
+        result = persist_note(conn, vault_path, note_path)
+        stored = conn.execute(
+            "SELECT is_active FROM documents WHERE source_path = 'Private/Policy.md';"
+        ).fetchone()
+
+    assert result is PersistResult.EXCLUDED
+    assert stored == (False,)
+
+
+def test_excluded_note_type_deactivates_existing_document(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir()
+    note_path = vault_path / "Policy.md"
+    note_path.write_text(
+        """---
+type: note
+ai_access: allowed
+---
+
+# Policy
+
+This note is later excluded by note type.
+""",
+        encoding="utf-8",
+    )
+
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+        assert persist_note(conn, vault_path, note_path) is PersistResult.INDEXED
+
+        monkeypatch.setattr(settings, "excluded_note_types", ("note",))
+        result = persist_note(conn, vault_path, note_path)
+        stored = conn.execute(
+            "SELECT is_active FROM documents WHERE source_path = 'Policy.md';"
+        ).fetchone()
+
+    assert result is PersistResult.EXCLUDED
+    assert stored == (False,)
+
+
+def test_reconciliation_marks_only_missing_active_documents_inactive() -> None:
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO documents (
+                document_uuid, source_path, title, ai_access,
+                metadata, content_hash, is_active
+            )
+            VALUES
+                (gen_random_uuid(), 'Present.md', 'Present', 'allowed', '{}', 'one', TRUE),
+                (gen_random_uuid(), 'Missing.md', 'Missing', 'allowed', '{}', 'two', TRUE),
+                (gen_random_uuid(), 'Old.md', 'Old', 'allowed', '{}', 'three', FALSE);
+            """
+        )
+        changed = reconcile_inactive_documents(conn, {"Present.md"})
+        rows = conn.execute(
+            "SELECT source_path, is_active FROM documents ORDER BY source_path;"
+        ).fetchall()
+
+    assert changed == 1
+    assert rows == [
+        ("Missing.md", False),
+        ("Old.md", False),
+        ("Present.md", True),
+    ]

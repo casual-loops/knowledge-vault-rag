@@ -22,6 +22,7 @@ def create_test_tables(conn: psycopg.Connection) -> None:
             ai_access TEXT NOT NULL DEFAULT 'local-only',
             metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
             content_hash TEXT NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
             indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """
@@ -51,6 +52,7 @@ def insert_document_with_chunk(
     note_type: str,
     topic: str,
     content: str,
+    is_active: bool = True,
 ) -> None:
     """Insert one synthetic document and one embedded chunk."""
 
@@ -63,7 +65,8 @@ def insert_document_with_chunk(
             note_type,
             ai_access,
             metadata,
-            content_hash
+            content_hash,
+            is_active
         )
         VALUES (
             gen_random_uuid(),
@@ -72,7 +75,8 @@ def insert_document_with_chunk(
             %s,
             'allowed',
             %s,
-            'test-hash'
+            'test-hash',
+            %s
         )
         RETURNING document_id;
         """,
@@ -81,6 +85,7 @@ def insert_document_with_chunk(
             title,
             note_type,
             Jsonb({"topic": [topic]}),
+            is_active,
         ),
     ).fetchone()
 
@@ -221,3 +226,28 @@ def test_semantic_search_filters_by_topic() -> None:
     assert len(results) == 1
     assert results[0].source_path == "Privacy Note.md"
     assert results[0].topic == ["privacy-demo"]
+
+
+def test_semantic_search_excludes_inactive_documents() -> None:
+    provider = DeterministicEmbeddingProvider(dimensions=1536)
+
+    with psycopg.connect(settings.database_url) as conn:
+        create_test_tables(conn)
+        insert_document_with_chunk(
+            conn,
+            provider,
+            "Inactive Note.md",
+            "Inactive Note",
+            "reference",
+            "synthetic",
+            "Synthetic content from an inactive note.",
+            is_active=False,
+        )
+
+        results = semantic_search(
+            conn,
+            provider,
+            query="synthetic",
+        )
+
+    assert results == []
