@@ -50,6 +50,7 @@ def semantic_search(
     JOIN documents d
         ON d.document_id = c.document_id
     WHERE c.embedding IS NOT NULL
+      AND d.is_active = TRUE
       AND (%s::text IS NULL OR d.note_type = %s::text)
       AND (
             %s::text IS NULL
@@ -133,6 +134,7 @@ def lexical_search(
                     c.content
                 )
             ) @@ plainto_tsquery('english', %s)
+          AND d.is_active = TRUE
           AND (%s::text IS NULL OR d.note_type = %s::text)
           AND (
                 %s::text IS NULL

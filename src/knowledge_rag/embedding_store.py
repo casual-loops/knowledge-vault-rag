@@ -23,6 +23,7 @@ def load_chunks_missing_embeddings(
         JOIN documents d
             ON d.document_id = c.document_id
         WHERE c.embedding IS NULL
+          AND d.is_active = TRUE
           AND d.ai_access = 'allowed'
         ORDER BY c.chunk_id
         LIMIT %s;

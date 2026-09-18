@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS documents (
     ai_access TEXT NOT NULL DEFAULT 'local-only',
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     content_hash TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
