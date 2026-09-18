@@ -184,3 +184,108 @@ def test_production_runner_loads_configuration_before_other_factories(
         raise AssertionError("Expected production configuration failure")
 
     assert calls == ["config"]
+
+
+def test_production_runner_dry_run_never_loads_embedding_provider(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from knowledge_rag.production_dry_run import (
+        ProductionDryRunSummary,
+    )
+
+    vault_path = (
+        tmp_path
+        / "production-vault"
+    ).resolve()
+
+    config = IngestionConfig(
+        vault_path=vault_path,
+        production=True,
+        production_opt_in=True,
+    )
+
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        runner,
+        "parse_args",
+        lambda: type(
+            "Args",
+            (),
+            {
+                "dry_run": True,
+            },
+        )(),
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "get_production_ingestion_config",
+        lambda: calls.append("config") or config,
+    )
+
+    def fail_provider():
+        raise AssertionError(
+            "Embedding provider must not load during dry-run"
+        )
+
+    monkeypatch.setattr(
+        runner,
+        "get_embedding_provider",
+        fail_provider,
+    )
+
+    class FakeConnection:
+        def __enter__(self):
+            calls.append("connection")
+            return self
+
+        def __exit__(
+            self,
+            exc_type,
+            exc,
+            traceback,
+        ) -> None:
+            return None
+
+    monkeypatch.setattr(
+        runner,
+        "get_connection",
+        FakeConnection,
+    )
+
+    summary = ProductionDryRunSummary(
+        discovered=1,
+        would_index=1,
+        would_update=0,
+        unchanged=0,
+        excluded=0,
+        external_eligible=1,
+        local_only=0,
+        results=(),
+        failures=(),
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "run_production_dry_run",
+        lambda conn, received_config: (
+            calls.append("dry-run")
+            or summary
+        ),
+    )
+
+    assert runner.main() == 0
+
+    assert calls == [
+        "config",
+        "connection",
+        "dry-run",
+    ]
+
+    output = capsys.readouterr().out
+
+    assert "mode: dry-run" in output
+    assert "would-index: 1" in output
