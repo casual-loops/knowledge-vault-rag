@@ -184,6 +184,26 @@ Unit coverage for the evaluation framework uses deterministic fixtures and does 
 
 Detailed methodology, metric definitions, threshold guidance, local execution instructions, and known limitations are documented in `docs/retrieval-evaluation.md`.
 
+## Production indexing control plane
+
+Production vault indexing is separated into three operational modes with increasing side effects.
+
+### Preflight
+
+Preflight validates production mode, explicit opt-in, the configured vault path, exclusion configuration, and `ai_access` privacy invariants. It runs before any database connection or embedding provider initialization.
+
+Missing, malformed, or unknown `ai_access` values resolve to `local-only`, and the preflight verifies that this conservative fallback does not become externally eligible.
+
+### Dry-run
+
+Dry-run discovers and parses the configured production vault, applies the same privacy rules as real ingestion, and performs read-only database comparisons. It classifies notes as `would-index`, `would-update`, `unchanged`, or `excluded` and reports external-provider eligibility without creating a provider or persisting changes.
+
+### Production ingestion
+
+The real production workflow persists eligible documents transactionally, preserves stable vault-relative source identity, skips unchanged content, reactivates previously inactive unchanged documents, reconciles missing source paths as inactive records after a successful scan, and generates embeddings only for active documents whose effective `ai_access` is `allowed`.
+
+All three modes emit sanitized operational summaries. Public documentation for the operator workflow is maintained in `docs/production-indexing-runbook.md`.
+
 ## Provider model
 
 Embedding and generation providers are selected through application configuration.
