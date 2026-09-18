@@ -75,13 +75,13 @@ Workstation
 
 Application development occurs from a workstation checkout of this public repository. The Python environment connects over the private LAN to the PostgreSQL instance hosted by the dedicated RAG container.
 
-The real private vault is not used for development ingestion yet. Development continues against:
+Public development continues against synthetic content, while production ingestion is now available through an explicitly gated private-vault workflow. Development fixtures remain:
 
 ```text
 examples/sample-vault/
 ```
 
-This keeps parser, chunking, database persistence, privacy behavior, retrieval behavior, and evaluation reproducible before any real personal data is indexed.
+This keeps parser, chunking, database persistence, privacy behavior, retrieval behavior, and evaluation reproducible without requiring private production data in the public repository.
 
 ## Repository layout
 
@@ -118,8 +118,9 @@ Docker Compose remains available as a portable development option, but the activ
 - [x] Phase 10: Grounded answer generation with citations
 - [x] Phase 11: Hybrid lexical and vector search
 - [x] Phase 12: Retrieval evaluation and regression tests
-- [ ] Phase 13: Production vault indexing
-- [ ] Phase 14: Web interface and operational hardening
+- [x] Phase 13: Production vault indexing
+- [ ] Phase 14: Refactor and maintainability hardening
+- [ ] Phase 15: Web interface and operational hardening
 
 ## FastAPI Query Service
 
@@ -255,6 +256,42 @@ If configured regression thresholds are breached, the command reports the affect
 
 Detailed methodology, metric definitions, threshold guidance, update process, and limitations are documented in `docs/retrieval-evaluation.md`.
 
+## Production Vault Indexing
+
+Phase 13 adds an explicitly gated production indexing workflow for a private vault replica.
+
+The operator sequence is:
+
+```text
+preflight
+  -> dry-run
+  -> production indexing
+  -> review sanitized summary
+  -> validate retrieval
+```
+
+Run privacy validation with:
+
+```powershell
+python scripts/ingest_production_vault.py --preflight
+```
+
+Run the read-only audit with:
+
+```powershell
+python scripts/ingest_production_vault.py --dry-run
+```
+
+Run production indexing with:
+
+```powershell
+python scripts/ingest_production_vault.py
+```
+
+Production configuration remains runtime-only, requires explicit opt-in, and reuses the same path, note-type, and `ai_access` privacy controls as the rest of the ingestion pipeline. Missing or malformed `ai_access` values fall back conservatively to `local-only`.
+
+Detailed prerequisites, first-run procedure, incremental behavior, rollback expectations, privacy validation, and logging guidance are documented in `docs/production-indexing-runbook.md`.
+
 ## Infrastructure follow-up
 
 The RAG container is operational, but two infrastructure controls remain open before the service is considered production-ready:
@@ -288,4 +325,4 @@ Generated answers return stable citation identifiers together with vault-relativ
 
 External generation applies privacy filtering before prompt construction so `local-only` content is not transmitted to an external provider or exposed through generated-answer citations.
 
-The next software milestone is Phase 13: production vault indexing.
+The next software milestone is Phase 14: refactor and maintainability hardening, followed by Phase 15: web interface and operational hardening.
