@@ -13,6 +13,10 @@ from knowledge_rag.production_ingestion import (
     ProductionIngestionSummary,
     run_production_ingestion,
 )
+from knowledge_rag.production_preflight import (
+    ProductionPreflightSummary,
+    run_production_preflight,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,10 +26,18 @@ def parse_args() -> argparse.Namespace:
         description="Run production vault ingestion.",
     )
 
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+
+    mode.add_argument(
         "--dry-run",
         action="store_true",
         help="Audit the production vault without making changes.",
+    )
+
+    mode.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Validate production privacy controls without indexing.",
     )
 
     return parser.parse_args()
@@ -99,12 +111,25 @@ def format_dry_run_summary(
 
 
 def main() -> int:
-    """Run production ingestion or a read-only dry-run."""
+    """Run production ingestion, preflight, or a read-only dry-run."""
 
     args = parse_args()
     config = get_production_ingestion_config()
 
-    if args.dry_run:
+    if getattr(args, "preflight", False):
+        summary = run_production_preflight(
+            config,
+        )
+
+        print(
+            format_preflight_summary(
+                summary,
+            )
+        )
+
+        return 0 if summary.passed else 1
+
+    if getattr(args, "dry_run", False):
         with get_connection() as conn:
             summary = run_production_dry_run(
                 conn,
@@ -135,3 +160,32 @@ def main() -> int:
     )
 
     return 0 if summary.complete else 1
+
+
+def format_preflight_summary(
+    summary: ProductionPreflightSummary,
+) -> str:
+    """Format a sanitized production privacy validation report."""
+
+    lines = [
+        "mode: preflight",
+        f"passed: {str(summary.passed).lower()}",
+        f"discovered: {summary.discovered}",
+        f"excluded-by-path: {summary.excluded_by_path}",
+        f"excluded-by-type: {summary.excluded_by_type}",
+        f"explicit-allowed: {summary.explicit_allowed}",
+        f"explicit-local-only: {summary.explicit_local_only}",
+        f"explicit-excluded: {summary.explicit_excluded}",
+        f"conservative-fallback: {summary.conservative_fallback}",
+    ]
+
+    for failure in summary.failures:
+        lines.append(
+            
+                f"failure: {failure.scope}: "
+                f"{failure.reference}: "
+                f"{failure.error_type}"
+            
+        )
+
+    return "\n".join(lines)
