@@ -289,3 +289,99 @@ def test_production_runner_dry_run_never_loads_embedding_provider(
 
     assert "mode: dry-run" in output
     assert "would-index: 1" in output
+
+
+def test_production_runner_preflight_uses_no_database_or_provider(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from knowledge_rag.production_preflight import (
+        ProductionPreflightSummary,
+    )
+
+    vault_path = (
+        tmp_path
+        / "production-vault"
+    ).resolve()
+
+    vault_path.mkdir()
+
+    config = IngestionConfig(
+        vault_path=vault_path,
+        production=True,
+        production_opt_in=True,
+    )
+
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        runner,
+        "parse_args",
+        lambda: type(
+            "Args",
+            (),
+            {
+                "preflight": True,
+                "dry_run": False,
+            },
+        )(),
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "get_production_ingestion_config",
+        lambda: calls.append("config") or config,
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "get_connection",
+        lambda: (_ for _ in ()).throw(
+            AssertionError(
+                "Database must not open during preflight"
+            )
+        ),
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "get_embedding_provider",
+        lambda: (_ for _ in ()).throw(
+            AssertionError(
+                "Provider must not load during preflight"
+            )
+        ),
+    )
+
+    summary = ProductionPreflightSummary(
+        discovered=1,
+        excluded_by_path=0,
+        excluded_by_type=0,
+        explicit_allowed=1,
+        explicit_local_only=0,
+        explicit_excluded=0,
+        conservative_fallback=0,
+        failures=(),
+    )
+
+    monkeypatch.setattr(
+        runner,
+        "run_production_preflight",
+        lambda received_config: (
+            calls.append("preflight")
+            or summary
+        ),
+    )
+
+    assert runner.main() == 0
+
+    assert calls == [
+        "config",
+        "preflight",
+    ]
+
+    output = capsys.readouterr().out
+
+    assert "mode: preflight" in output
+    assert "passed: true" in output
