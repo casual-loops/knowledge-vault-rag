@@ -22,11 +22,12 @@
 8. Retain raw latency samples and report median and nearest-rank p95.
 9. Keep retrieval quality separate from the scaled performance corpus.
 10. Do not introduce hard performance thresholds.
-11. Require BENCHMARK_DATABASE_URL, a database name containing benchmark, a target distinct from the application database, and explicit reset authorization.
-12. Never serialize database URLs, hostnames, usernames, IP addresses, ports, database names, filesystem paths, environment variables, note bodies, or raw exception text.
-13. The canonical baseline file may be written only by a complete successful run.
-14. Use test-driven development and commit after every task.
-15. Database-backed tests remain active and must pass in the PostgreSQL and pgvector environment.
+11. Record retrieval-quality threshold status without using it as a completion gate because the SHA-256 deterministic provider does not encode semantic similarity.
+12. Require BENCHMARK_DATABASE_URL, a database name containing benchmark, a target distinct from the application database, and explicit reset authorization.
+13. Never serialize database URLs, hostnames, usernames, IP addresses, ports, database names, filesystem paths, environment variables, note bodies, or raw exception text.
+14. The canonical baseline file may be written only by a complete successful run.
+15. Use test-driven development and commit after every task.
+16. Database-backed tests remain active and must pass in the PostgreSQL and pgvector environment.
 
 ---
 
@@ -242,11 +243,11 @@ class BenchmarkReport:
     complete: bool
     schema_version: int
     workload_version: int
-    git_commit: str
+    git_commit: str | None
     executed_at_utc: str
-    environment: EnvironmentMetadata
+    environment: EnvironmentMetadata | None
     workload: dict[str, Any]
-    quality: QualityBaselineResult
+    quality: QualityBaselineResult | None
     tiers: tuple[TierBenchmarkResult, ...]
     failure_stage: str | None = None
     failure_type: str | None = None
@@ -624,7 +625,7 @@ git commit -m "feat: guard benchmark database operations"
 
 **Interfaces:**
 - Consumes: discover_markdown_files, persist_note, reconcile_inactive_documents, load_chunks_missing_embeddings, persist_embeddings, DeterministicEmbeddingProvider, count_benchmark_rows, calculate_rate.
-- Produces: run_indexing_stage(conn: Connection, vault_path: Path, scenario: str, chunks_per_note: int, clock_ns: Callable[[], int] = perf_counter_ns) -> IndexingBenchmarkResult.
+- Produces: run_indexing_stage(conn: Connection, vault_path: Path, scenario: str, chunks_per_note: int | None = None, clock_ns: Callable[[], int] = perf_counter_ns) -> IndexingBenchmarkResult.
 - Produces: run_embedding_stage(conn: Connection, provider: EmbeddingProvider, batch_size: int = 100, clock_ns: Callable[[], int] = perf_counter_ns) -> EmbeddingBenchmarkResult.
 
 - [ ] **Step 1: Write a failing indexing-stage unit test**
@@ -661,9 +662,11 @@ The function must:
 5. Reconcile in a separate transaction.
 6. Stop the clock immediately after reconciliation.
 7. Query observed document and chunk counts after stopping the timer.
-8. Set affected_chunks to indexed count times chunks_per_note.
-9. Calculate document throughput from discovered notes.
-10. Calculate chunk throughput from max(affected_chunks, observed_chunks) for clean indexing and affected_chunks for later scenarios.
+8. For clean indexing, set affected_chunks to the increase in observed chunks.
+9. For unchanged indexing, require affected_chunks to be zero.
+10. For changed indexing, require chunks_per_note and set affected_chunks to indexed count times chunks_per_note.
+11. Calculate document throughput from discovered notes.
+12. Calculate chunk throughput from affected_chunks, allowing a zero count with a positive duration.
 
 Reject zero discovered notes and any per-note failure so a partial benchmark cannot appear complete.
 
@@ -805,6 +808,7 @@ git commit -m "feat: measure retrieval baseline latency"
 - Produces: run_performance_baseline(config: BenchmarkRunConfig) -> BenchmarkReport.
 - Produces: write_benchmark_report(report: BenchmarkReport, output_path: Path, baselines_dir: Path) -> None.
 - Produces: format_benchmark_summary(report: BenchmarkReport) -> str.
+- Produces: make_incomplete_report(workload_version: int, workload: dict[str, Any], stage: str, error_type: str, git_commit: str | None = None) -> BenchmarkReport.
 - Produces: scripts.run_performance_baseline.main() -> int.
 
 - [ ] **Step 1: Add BenchmarkRunConfig**
@@ -832,14 +836,14 @@ Monkeypatch database connections and every stage function. Prove this order:
 1. Validate target before connecting.
 2. Reset tables.
 3. Index and embed sample vault.
-4. Run quality evaluation and require it to pass.
+4. Run quality evaluation and record its metrics and threshold status without treating threshold failure as a benchmark failure.
 5. For each tier, reset tables, generate corpus, run clean indexing, run initial embedding, run unchanged indexing, mutate 10 percent, run changed indexing, run changed embedding, run retrieval timing.
 6. Collect sanitized environment metadata.
 7. Return a complete BenchmarkReport with tiers ordered 100, 1,000, 10,000.
 8. Remove temporary generated vaults.
 9. Preserve a supplied work_directory.
 
-Add separate tests showing a failed quality threshold or failed stage stops later tiers and raises a typed BenchmarkStageError whose string contains only the stage name and exception type.
+Add a test showing a failed quality threshold is recorded and later tiers still run. Add separate tests showing a stage exception stops later tiers and raises a typed BenchmarkStageError whose string contains only the stage name and exception type.
 
 - [ ] **Step 3: Implement the full orchestrator**
 
@@ -907,7 +911,7 @@ main() must:
 5. Print format_benchmark_summary.
 6. Return 0.
 
-On failure, print only benchmark incomplete, the sanitized stage, and exception type. If diagnostic-output is supplied, write an incomplete report there. Return 1.
+On failure, print only benchmark incomplete, the sanitized stage, and exception type. If diagnostic-output is supplied, call make_incomplete_report with environment and quality set to None, tiers set to an empty tuple, and only the sanitized stage and exception type populated. Write that incomplete report outside the canonical baselines directory. Return 1.
 
 The target validation must occur before psycopg.connect, corpus generation, or output replacement.
 
@@ -1062,9 +1066,7 @@ Expected: no violations.
 - [ ] **Step 3: Confirm the private benchmark configuration without printing it**
 
 ~~~powershell
-if (-not $env:BENCHMARK_DATABASE_URL -and -not (Select-String -Path .env -Pattern '^BENCHMARK_DATABASE_URL=.+$' -Quiet)) {
-    throw "BENCHMARK_DATABASE_URL is not configured"
-}
+$benchmarkEnvFileConfigured = (Test-Path .env) -and (Select-String -Path .env -Pattern '^BENCHMARK_DATABASE_URL=.+
 ~~~
 
 Expected: no output.
@@ -1075,7 +1077,7 @@ Expected: no output.
 python scripts/run_performance_baseline.py --allow-reset
 ~~~
 
-Expected: exit code 0, complete true, quality thresholds pass, and all three tiers report expected note and chunk counts.
+Expected: exit code 0, complete true, quality metrics and threshold status recorded, and all three tiers report expected note and chunk counts.
 
 - [ ] **Step 5: Run the canonical baseline**
 
@@ -1088,7 +1090,80 @@ Expected: exit code 0 and a complete canonical report.
 - [ ] **Step 6: Validate report structure and counts**
 
 ~~~powershell
-python -c "import json, pathlib; p=pathlib.Path('benchmarks/baselines/phase-14-pre-refactor.json'); d=json.loads(p.read_text()); assert d['complete'] is True; assert [x['note_count'] for x in d['tiers']] == [100, 1000, 10000]; assert [x['observed_chunks'] for x in d['tiers']] == [300, 3000, 30000]; assert d['quality']['passed'] is True; print('baseline structure valid')"
+python -c "import json, pathlib; p=pathlib.Path('benchmarks/baselines/phase-14-pre-refactor.json'); d=json.loads(p.read_text()); assert d['complete'] is True; assert [x['note_count'] for x in d['tiers']] == [100, 1000, 10000]; assert [x['observed_chunks'] for x in d['tiers']] == [300, 3000, 30000]; assert isinstance(d['quality']['passed'], bool); print('baseline structure valid')"
+~~~
+
+Expected: baseline structure valid.
+
+- [ ] **Step 7: Scan the report for prohibited data patterns**
+
+Run searches for URL schemes, local path prefixes, private-address prefixes, and credential-shaped keys:
+
+~~~powershell
+rg -n "postgresql://|DATABASE_URL|BENCHMARK_DATABASE_URL|hostname|username|password|api[_-]?key|(^|[^0-9])(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)|[A-Za-z]:\\\\|/home/|/Users/" benchmarks/baselines/phase-14-pre-refactor.json
+~~~
+
+Expected: no matches.
+
+- [ ] **Step 8: Review measurement plausibility**
+
+Confirm:
+
+1. Every query has 30 raw samples.
+2. Every retrieval mode has 90 combined samples per tier.
+3. Median and p95 are nonnegative, and p95 is at least the median.
+4. Clean and changed indexing durations are positive.
+5. Initial embedding counts equal tier chunk counts.
+6. Changed embedding counts equal 10 percent of tier chunk counts.
+7. The unchanged run creates no chunks or embeddings.
+8. Environment fields contain only the six approved values.
+
+If any invariant fails, add a regression test, make the smallest correction, rerun the focused test, rerun the full suite, and regenerate the baseline.
+
+- [ ] **Step 9: Commit the canonical baseline**
+
+~~~bash
+git add benchmarks/baselines/phase-14-pre-refactor.json
+git commit -m "perf: record Phase 14 pre-refactor baseline"
+~~~
+
+- [ ] **Step 10: Final branch verification**
+
+~~~powershell
+git status --short
+git diff --check main...HEAD
+python -m pytest
+~~~
+
+Expected: clean status, no whitespace errors, and all tests pass.
+ -Quiet)
+if (-not $env:BENCHMARK_DATABASE_URL -and -not $benchmarkEnvFileConfigured) {
+    throw "BENCHMARK_DATABASE_URL is not configured"
+}
+~~~
+
+Expected: no output.
+
+- [ ] **Step 4: Run a disposable full benchmark**
+
+~~~powershell
+python scripts/run_performance_baseline.py --allow-reset
+~~~
+
+Expected: exit code 0, complete true, quality metrics and threshold status recorded, and all three tiers report expected note and chunk counts.
+
+- [ ] **Step 5: Run the canonical baseline**
+
+~~~powershell
+python scripts/run_performance_baseline.py --allow-reset --output benchmarks/baselines/phase-14-pre-refactor.json
+~~~
+
+Expected: exit code 0 and a complete canonical report.
+
+- [ ] **Step 6: Validate report structure and counts**
+
+~~~powershell
+python -c "import json, pathlib; p=pathlib.Path('benchmarks/baselines/phase-14-pre-refactor.json'); d=json.loads(p.read_text()); assert d['complete'] is True; assert [x['note_count'] for x in d['tiers']] == [100, 1000, 10000]; assert [x['observed_chunks'] for x in d['tiers']] == [300, 3000, 30000]; assert isinstance(d['quality']['passed'], bool); print('baseline structure valid')"
 ~~~
 
 Expected: baseline structure valid.
