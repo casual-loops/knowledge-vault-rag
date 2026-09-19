@@ -70,7 +70,7 @@ The runner will:
 
 The quality dataset remains small and judged. Generated performance notes are never mixed into this phase because the current deterministic embedding provider is hash-based rather than semantically meaningful. Mixing thousands of generated distractors into the judged corpus would make semantic-quality results arbitrary.
 
-A quality-threshold failure makes the benchmark incomplete.
+The threshold outcome is recorded as part of the honest pre-refactor baseline. A threshold failure does not make the provider-free benchmark incomplete because the current SHA-256 deterministic provider does not encode semantic similarity. Later refactors compare quality metrics and threshold status against this captured result.
 
 ## Synthetic performance corpus
 
@@ -226,7 +226,7 @@ The command returns a nonzero exit status when:
 1. Safety validation fails.
 2. Corpus generation or manifest validation fails.
 3. Database preparation fails.
-4. Quality thresholds fail.
+4. Quality evaluation cannot complete or produce a valid result.
 5. Any indexing, embedding, retrieval, calculation, or serialization stage fails.
 6. Expected operation or sample counts do not match observed counts.
 
@@ -238,7 +238,7 @@ Issue #69 will not add hard latency or throughput thresholds. Shared-host activi
 
 Later Phase 14 refactors will run the same workload and compare:
 
-1. Retrieval quality, which must continue to satisfy existing thresholds.
+1. Retrieval quality metrics and threshold status, which must not regress relative to the captured provider-free baseline.
 2. Median and p95 latency by mode and tier.
 3. Initial, unchanged, and changed-note indexing throughput.
 4. Vector-generation, persistence, and total embedding throughput.
@@ -283,7 +283,7 @@ The canonical homelab run will verify:
 
 1. All three approved tiers complete.
 2. Expected and observed counts agree.
-3. Quality thresholds pass.
+3. Quality metrics and threshold status are captured without using threshold outcome as a completion gate.
 4. No hosted provider is contacted.
 5. No private content or infrastructure identifiers appear in the result.
 6. The full test suite and changed-file lint checks pass.
