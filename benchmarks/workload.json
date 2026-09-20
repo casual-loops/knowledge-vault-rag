@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "seed": 14069,
+  "tiers": [100, 1000, 10000],
+  "chunks_per_note": 3,
+  "changed_fraction": 0.1,
+  "warmup_iterations": 5,
+  "measured_iterations": 30,
+  "queries": [
+    {
+      "id": "semantic-unfiltered",
+      "retrieval_mode": "semantic",
+      "query": "capacity planning for distributed monitoring",
+      "note_type": null,
+      "topic": null
+    },
+    {
+      "id": "semantic-filtered",
+      "retrieval_mode": "semantic",
+      "query": "identity access review procedure",
+      "note_type": "reference",
+      "topic": "identity"
+    },
+    {
+      "id": "semantic-no-match",
+      "retrieval_mode": "semantic",
+      "query": "quasar marzipan submarine orchard",
+      "note_type": null,
+      "topic": null
+    },
+    {
+      "id": "lexical-unfiltered",
+      "retrieval_mode": "lexical",
+      "query": "monitoring alert threshold",
+      "note_type": null,
+      "topic": null
+    },
+    {
+      "id": "lexical-filtered",
+      "retrieval_mode": "lexical",
+      "query": "role assignment",
+      "note_type": "reference",
+      "topic": "identity"
+    },
+    {
+      "id": "lexical-no-match",
+      "retrieval_mode": "lexical",
+      "query": "quasar marzipan submarine orchard",
+      "note_type": null,
+      "topic": null
+    },
+    {
+      "id": "hybrid-unfiltered",
+      "retrieval_mode": "hybrid",
+      "query": "private knowledge retrieval architecture",
+      "note_type": null,
+      "topic": null
+    },
+    {
+      "id": "hybrid-filtered",
+      "retrieval_mode": "hybrid",
+      "query": "operational change validation",
+      "note_type": "project",
+      "topic": "operations"
+    },
+    {
+      "id": "hybrid-no-match",
+      "retrieval_mode": "hybrid",
+      "query": "quasar marzipan submarine orchard",
+      "note_type": null,
+      "topic": null
+    }
+  ]
+}

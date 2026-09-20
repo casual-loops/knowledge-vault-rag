@@ -67,6 +67,7 @@ Workstation
 | Lexical search        | PostgreSQL full-text search                                                        | Implemented                                 |
 | Hybrid ranking        | Reciprocal Rank Fusion                                                             | Implemented                                 |
 | Retrieval evaluation  | Synthetic relevance judgments, metrics, runner, and regression thresholds         | Implemented                                 |
+| Performance baseline  | Provider-free synthetic indexing, embedding, and retrieval benchmark               | Implemented                                 |
 | Embeddings            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
 | Generation            | Provider abstraction with deterministic local provider and optional OpenAI adapter | Implemented                                 |
 | Production runtime    | Dedicated Debian 13 LXC                                                            | Operational                                 |
@@ -87,6 +88,7 @@ This keeps parser, chunking, database persistence, privacy behavior, retrieval b
 
 ```text
 .
+├── benchmarks/
 ├── docs/
 ├── evaluation/
 ├── examples/sample-vault/
@@ -119,7 +121,7 @@ Docker Compose remains available as a portable development option, but the activ
 - [x] Phase 11: Hybrid lexical and vector search
 - [x] Phase 12: Retrieval evaluation and regression tests
 - [x] Phase 13: Production vault indexing
-- [ ] Phase 14: Refactor and maintainability hardening
+- [ ] Phase 14: Refactor and maintainability hardening and performance baseline
 - [ ] Phase 15: Web interface and operational hardening
 
 ## FastAPI Query Service
@@ -325,4 +327,19 @@ Generated answers return stable citation identifiers together with vault-relativ
 
 External generation applies privacy filtering before prompt construction so `local-only` content is not transmitted to an external provider or exposed through generated-answer citations.
 
-The next software milestone is Phase 14: refactor and maintainability hardening, followed by Phase 15: web interface and operational hardening.
+The next software milestone is Phase 14: refactor and maintainability hardening,
+followed by Phase 15: web interface and operational hardening.
+
+## Phase 14 performance baseline
+
+The benchmark runs against a separately configured, disposable PostgreSQL database
+and requires explicit reset authorization:
+
+```powershell
+python scripts/run_performance_baseline.py --allow-reset
+```
+
+It uses deterministic local 1,536-dimensional embeddings and synthetic corpora;
+it does not measure hosted-provider performance. See
+[the performance benchmarking guide](docs/performance-benchmarking.md) for
+prerequisites, database safeguards, canonical baseline capture, and comparison.

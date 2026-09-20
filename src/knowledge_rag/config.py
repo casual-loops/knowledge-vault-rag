@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     vault_path: Path = Path("examples/sample-vault")
     database_url: str = "postgresql://knowledge_rag:change-me@localhost:5432/knowledge_rag"
+    benchmark_database_url: str | None = None
 
     excluded_paths: tuple[str, ...] = ()
     excluded_note_types: tuple[str, ...] = ()

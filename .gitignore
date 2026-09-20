@@ -37,3 +37,7 @@ knowledge-vault/
 **/.trash/
 
 .test-temp/
+
+# Disposable benchmark artifacts; reviewed baselines remain versioned.
+benchmarks/results/
+benchmarks/work/

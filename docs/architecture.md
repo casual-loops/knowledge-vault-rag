@@ -184,6 +184,32 @@ Unit coverage for the evaluation framework uses deterministic fixtures and does 
 
 Detailed methodology, metric definitions, threshold guidance, local execution instructions, and known limitations are documented in `docs/retrieval-evaluation.md`.
 
+## Performance baseline subsystem
+
+The provider-free performance baseline is isolated from the production vault and
+production database. The existing judged sample corpus flows only through the
+quality evaluation phase. Separately, deterministic generated corpus tiers flow
+through the current indexing, deterministic 1,536-dimensional embedding, and
+semantic/lexical/hybrid retrieval paths for timing. Both phases contribute to one
+sanitized, versioned benchmark report; neither accepts private source content or
+production database state.
+
+```mermaid
+flowchart TD
+    Judged[Judged sample corpus] --> Quality[Quality evaluation]
+    Generated[Generated tier corpus] --> Index[Indexing]
+    Index --> Embed[Deterministic embedding]
+    Embed --> Retrieval[Retrieval timing]
+    Quality --> Report[Sanitized versioned report]
+    Retrieval --> Report
+```
+
+The runner validates a dedicated benchmark database before resetting only
+`documents` and `document_chunks`. It requires an explicit reset flag, a database
+name containing `benchmark`, and an identity distinct from the application
+database. The local deterministic provider is instantiated directly, so benchmark
+results measure application/database behavior rather than hosted-provider latency.
+
 ## Production indexing control plane
 
 Production vault indexing is separated into three operational modes with increasing side effects.
