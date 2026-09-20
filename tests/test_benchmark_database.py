@@ -159,9 +159,13 @@ def test_collect_environment_metadata_contains_only_approved_fields(monkeypatch:
 
     monkeypatch.setattr("knowledge_rag.benchmark_database.platform", _Platform)
     monkeypatch.setattr("knowledge_rag.benchmark_database.os.cpu_count", lambda: 8)
+    # Windows does not expose os.sysconf. Remove it first so this Linux
+    # simulation does not depend on the host platform providing the attribute.
+    monkeypatch.delattr("knowledge_rag.benchmark_database.os.sysconf", raising=False)
     monkeypatch.setattr(
         "knowledge_rag.benchmark_database.os.sysconf",
         lambda name: {"SC_PAGE_SIZE": 4096, "SC_PHYS_PAGES": 1024}[name],
+        raising=False,
     )
     conn = _Connection([("PostgreSQL 16.4",), ("0.8.5",)])
 

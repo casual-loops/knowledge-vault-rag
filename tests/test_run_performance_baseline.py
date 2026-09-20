@@ -4,12 +4,43 @@ import json
 import os
 import subprocess
 import sys
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+
+@contextmanager
+def _directory_redirect(link: Path, target: Path):
+    """Create a directory redirect without requiring Windows symlink privilege."""
+
+    is_symlink = True
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip("directory symlinks and junctions are unavailable")
+        is_symlink = False
+
+    try:
+        yield
+    finally:
+        if is_symlink:
+            link.unlink()
+        elif link.exists():
+            # rmdir removes a junction itself; it does not recurse into its target.
+            link.rmdir()
+        assert target.is_dir()
 
 
 def _complete_report():
@@ -410,9 +441,10 @@ def test_incomplete_report_rejects_lexically_canonical_symlink_output(tmp_path) 
     outside = tmp_path / "outside"
     outside.mkdir()
     link = baselines / "redirect"
-    os.symlink(outside, link)
-
-    with pytest.raises(ValueError, match="incomplete report cannot replace a canonical baseline"):
+    with (
+        _directory_redirect(link, outside),
+        pytest.raises(ValueError, match="incomplete report cannot replace a canonical baseline"),
+    ):
         benchmark.write_benchmark_report(report, link / "failure.json", baselines)
 
 
